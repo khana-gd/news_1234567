@@ -55,30 +55,86 @@ async def get_status_checks():
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
 
+import urllib.request
+import json
+import re
+
+def fetch_wp_post_sync(wp_id: str):
+    try:
+        url = f"https://mypublicsamachar.com/wp-json/wp/v2/posts/{wp_id}?_embed=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            t = html.unescape(data.get("title", {}).get("rendered", ""))
+            c = data.get("content", {}).get("rendered", "") or data.get("excerpt", {}).get("rendered", "")
+            img = data.get("jetpack_featured_media_url", "")
+            if not img and "_embedded" in data:
+                media = data["_embedded"].get("wp:featuredmedia", [])
+                if media and isinstance(media, list) and len(media) > 0:
+                    img = media[0].get("source_url", "")
+            auth = ""
+            if "_embedded" in data:
+                authors = data["_embedded"].get("author", [])
+                if authors and isinstance(authors, list) and len(authors) > 0:
+                    auth = authors[0].get("name", "")
+            return t, c, img, auth
+    except Exception as e:
+        logger.error(f"Error fetching WP post {wp_id}: {e}")
+        return "", "", "", ""
+
+def fetch_yt_oembed_sync(yt_id: str):
+    try:
+        url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={yt_id}&format=json"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            t = html.unescape(data.get("title", ""))
+            auth = data.get("author_name", "Public Samachar")
+            img = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
+            src = f"https://www.youtube.com/embed/{yt_id}"
+            return t, f"Watch '{t}' on My Public Samachar.", img, auth, src
+    except Exception as e:
+        logger.error(f"Error fetching YT oembed {yt_id}: {e}")
+        return "", "", "", "", ""
+
+
 @api_router.get("/cf/share/{video_id}", response_class=HTMLResponse)
 @api_router.get("/og/{video_id}", response_class=HTMLResponse)
 async def share_video_page(video_id: str):
     video = None
+    title = ""
+    description = ""
+    video_url = ""
+    thumb_url = ""
+    reporter_name = ""
+    location = ""
+
+    clean_id = video_id.replace("yt_", "").strip()
+
+    # 1. Search MongoDB
     try:
         collections = await db.list_collection_names()
         id_queries = [
             {"id": video_id},
             {"_id": video_id},
             {"video_id": video_id},
-            {"cf_id": video_id}
+            {"cf_id": video_id},
+            {"id": clean_id},
+            {"_id": clean_id}
         ]
         if video_id.isdigit():
             id_queries.extend([{"id": int(video_id)}, {"_id": int(video_id)}])
-            
-        search_query = {"$or": id_queries}
+        elif clean_id.isdigit():
+            id_queries.extend([{"id": int(clean_id)}, {"_id": int(clean_id)}])
 
+        search_query = {"$or": id_queries}
         priority_cols = ["cf_videos", "videos", "posts", "news_feed", "news", "articles"]
         for col_name in priority_cols:
             if col_name in collections:
                 video = await db[col_name].find_one(search_query)
                 if video:
                     break
-        
+
         if not video:
             for col_name in collections:
                 if col_name not in priority_cols and not col_name.startswith("system."):
@@ -86,14 +142,7 @@ async def share_video_page(video_id: str):
                     if video:
                         break
     except Exception as e:
-        logger.error(f"Error fetching video {video_id}: {e}")
-
-    title = ""
-    description = ""
-    video_url = ""
-    thumb_url = ""
-    reporter_name = ""
-    location = ""
+        logger.error(f"Error fetching video {video_id} from MongoDB: {e}")
 
     if video:
         title = video.get("title") or video.get("name") or video.get("caption") or video.get("headline") or video.get("post_title") or ""
@@ -102,6 +151,36 @@ async def share_video_page(video_id: str):
         thumb_url = video.get("thumb_url") or video.get("thumbUrl") or video.get("thumbnail") or video.get("poster") or video.get("image") or ""
         reporter_name = video.get("reporter_name") or video.get("reporterName") or video.get("author") or video.get("reporter") or video.get("user") or ""
         location = video.get("location") or video.get("place") or video.get("district") or video.get("city") or ""
+
+    # 2. If not found in MongoDB and ID is numeric, fetch from WordPress REST API
+    if not title and (video_id.isdigit() or clean_id.isdigit()):
+        wp_id = video_id if video_id.isdigit() else clean_id
+        t, c, img, auth = await asyncio.to_thread(fetch_wp_post_sync, wp_id)
+        if t:
+            title = t
+            description = c
+            if img:
+                thumb_url = img
+            if auth:
+                reporter_name = auth
+
+            mp4_match = re.search(r'src=["\'](https?://[^"\']+\.mp4)["\']', c, re.IGNORECASE)
+            if mp4_match:
+                video_url = mp4_match.group(1)
+            else:
+                iframe_match = re.search(r'src=["\'](https?://[^"\']+)["\']', c, re.IGNORECASE)
+                if iframe_match:
+                    video_url = iframe_match.group(1)
+
+    # 3. If not found and YouTube ID
+    if not title and (video_id.startswith("yt_") or len(clean_id) == 11):
+        t, c, img, auth, src = await asyncio.to_thread(fetch_yt_oembed_sync, clean_id)
+        if t:
+            title = t
+            description = c
+            thumb_url = img
+            reporter_name = auth
+            video_url = src
 
     if not title:
         title = "My Public Samachar - Local Video News"
@@ -113,17 +192,22 @@ async def share_video_page(video_id: str):
         location = "Karnataka"
 
     safe_title = html.escape(str(title))
-    safe_desc = html.escape(str(description))
+    plain_desc = re.sub(r'<[^>]+>', '', str(description))
+    safe_desc = html.escape(str(plain_desc))
     safe_reporter = html.escape(str(reporter_name))
     safe_location = html.escape(str(location))
     safe_video_url = html.escape(str(video_url))
     safe_thumb_url = html.escape(str(thumb_url))
 
-    paragraphs = [p.strip() for p in str(description).split("\n") if p.strip()]
-    if not paragraphs:
-        paragraphs = [safe_desc]
-    
-    rendered_paragraphs = "".join(f"<p class='content-paragraph'>{html.escape(p)}</p>" for p in paragraphs)
+    if "<p" in str(description) or "<div" in str(description) or "<br" in str(description):
+        clean_body = re.sub(r'<script.*?>.*?</script>', '', str(description), flags=re.DOTALL | re.IGNORECASE)
+        clean_body = re.sub(r'<style.*?>.*?</style>', '', clean_body, flags=re.DOTALL | re.IGNORECASE)
+        rendered_body = clean_body
+    else:
+        paragraphs = [p.strip() for p in str(description).split("\n") if p.strip()]
+        if not paragraphs:
+            paragraphs = [safe_desc]
+        rendered_body = "".join(f"<p class='content-paragraph'>{html.escape(p)}</p>" for p in paragraphs)
 
     html_content = f"""<!DOCTYPE html>
 <html lang="kn">
@@ -342,7 +426,7 @@ async def share_video_page(video_id: str):
             </div>
 
             <div class="article-body">
-                {rendered_paragraphs}
+                {rendered_body}
             </div>
 
             <div class="action-buttons">
