@@ -59,6 +59,34 @@ import urllib.request
 import json
 import re
 
+CF_ACCOUNT_ID = os.environ.get('CF_ACCOUNT_ID', '')
+CF_API_TOKEN = os.environ.get('CF_API_TOKEN', '')
+D1_DB_ID = os.environ.get('D1_DB_ID', '')
+R2_PUBLIC_CDN = os.environ.get('R2_PUBLIC_CDN_URL', 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev')
+
+def get_cf_headers():
+    return {
+        'Authorization': f'Bearer {CF_API_TOKEN}',
+        'Content-Type': 'application/json',
+    }
+
+def fetch_d1_post_sync(video_id: str):
+    if not CF_ACCOUNT_ID or not CF_API_TOKEN or not D1_DB_ID:
+        return None
+    url = f'https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/d1/database/{D1_DB_ID}/query'
+    body = {'sql': 'SELECT * FROM news_feed WHERE id = ?', 'params': [video_id]}
+    try:
+        req = urllib.request.Request(url, data=json.dumps(body).encode('utf-8'), headers=get_cf_headers())
+        with urllib.request.urlopen(req, timeout=4.0) as resp:
+            data = json.loads(resp.read().decode('utf-8', errors='ignore'))
+            if data.get('success'):
+                results = data.get('result', [{}])[0].get('results', [])
+                if results and len(results) > 0:
+                    return results[0]
+    except Exception as e:
+        logger.error(f"D1 fetch error for {video_id}: {e}")
+    return None
+
 def fetch_wp_post_sync(wp_id: str):
     try:
         url = f"https://mypublicsamachar.com/wp-json/wp/v2/posts/{wp_id}?_embed=1"
@@ -111,46 +139,64 @@ async def share_video_page(video_id: str):
 
     clean_id = video_id.replace("yt_", "").strip()
 
-    # 1. Search MongoDB
-    try:
-        collections = await db.list_collection_names()
-        id_queries = [
-            {"id": video_id},
-            {"_id": video_id},
-            {"video_id": video_id},
-            {"cf_id": video_id},
-            {"id": clean_id},
-            {"_id": clean_id}
-        ]
-        if video_id.isdigit():
-            id_queries.extend([{"id": int(video_id)}, {"_id": int(video_id)}])
-        elif clean_id.isdigit():
-            id_queries.extend([{"id": int(clean_id)}, {"_id": int(clean_id)}])
+    # 1. Search Cloudflare D1 first (primary database for reporter uploaded videos)
+    d1_post = await asyncio.to_thread(fetch_d1_post_sync, clean_id)
+    if not d1_post and video_id != clean_id:
+        d1_post = await asyncio.to_thread(fetch_d1_post_sync, video_id)
 
-        search_query = {"$or": id_queries}
-        priority_cols = ["cf_videos", "videos", "posts", "news_feed", "news", "articles"]
-        for col_name in priority_cols:
-            if col_name in collections:
-                video = await db[col_name].find_one(search_query)
-                if video:
-                    break
+    if d1_post:
+        title = d1_post.get("title", "")
+        description = d1_post.get("description", "")
+        location = d1_post.get("location", "")
+        reporter_name = d1_post.get("reporter_name", "")
+        video_url = d1_post.get("video_url", "")
+        thumb_url = d1_post.get("thumb_url", "")
+        if video_url and not video_url.startswith("http"):
+            video_url = f"{R2_PUBLIC_CDN}/{video_url.lstrip('/')}"
+        if thumb_url and not thumb_url.startswith("http"):
+            thumb_url = f"{R2_PUBLIC_CDN}/{thumb_url.lstrip('/')}"
 
-        if not video:
-            for col_name in collections:
-                if col_name not in priority_cols and not col_name.startswith("system."):
+    # 2. Search MongoDB if not found in D1
+    if not title:
+        try:
+            collections = await db.list_collection_names()
+            id_queries = [
+                {"id": video_id},
+                {"_id": video_id},
+                {"video_id": video_id},
+                {"cf_id": video_id},
+                {"id": clean_id},
+                {"_id": clean_id}
+            ]
+            if video_id.isdigit():
+                id_queries.extend([{"id": int(video_id)}, {"_id": int(video_id)}])
+            elif clean_id.isdigit():
+                id_queries.extend([{"id": int(clean_id)}, {"_id": int(clean_id)}])
+
+            search_query = {"$or": id_queries}
+            priority_cols = ["cf_videos", "videos", "posts", "news_feed", "news", "articles"]
+            for col_name in priority_cols:
+                if col_name in collections:
                     video = await db[col_name].find_one(search_query)
                     if video:
                         break
-    except Exception as e:
-        logger.error(f"Error fetching video {video_id} from MongoDB: {e}")
 
-    if video:
-        title = video.get("title") or video.get("name") or video.get("caption") or video.get("headline") or video.get("post_title") or ""
-        description = video.get("description") or video.get("content") or video.get("summary") or video.get("body") or video.get("text") or video.get("post_content") or ""
-        video_url = video.get("video_url") or video.get("videoUrl") or video.get("url") or video.get("src") or ""
-        thumb_url = video.get("thumb_url") or video.get("thumbUrl") or video.get("thumbnail") or video.get("poster") or video.get("image") or ""
-        reporter_name = video.get("reporter_name") or video.get("reporterName") or video.get("author") or video.get("reporter") or video.get("user") or ""
-        location = video.get("location") or video.get("place") or video.get("district") or video.get("city") or ""
+            if not video:
+                for col_name in collections:
+                    if col_name not in priority_cols and not col_name.startswith("system."):
+                        video = await db[col_name].find_one(search_query)
+                        if video:
+                            break
+        except Exception as e:
+            logger.error(f"Error fetching video {video_id} from MongoDB: {e}")
+
+        if video:
+            title = video.get("title") or video.get("name") or video.get("caption") or video.get("headline") or video.get("post_title") or ""
+            description = video.get("description") or video.get("content") or video.get("summary") or video.get("body") or video.get("text") or video.get("post_content") or ""
+            video_url = video.get("video_url") or video.get("videoUrl") or video.get("url") or video.get("src") or ""
+            thumb_url = video.get("thumb_url") or video.get("thumbUrl") or video.get("thumbnail") or video.get("poster") or video.get("image") or ""
+            reporter_name = video.get("reporter_name") or video.get("reporterName") or video.get("author") or video.get("reporter") or video.get("user") or ""
+            location = video.get("location") or video.get("place") or video.get("district") or video.get("city") or ""
 
     # 2. If not found in MongoDB and ID is numeric, fetch from WordPress REST API
     if not title and (video_id.isdigit() or clean_id.isdigit()):
