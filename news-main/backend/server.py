@@ -121,8 +121,8 @@ async def share_video_page(video_id: str):
         }}
         body {{
             font-family: 'Noto Sans Kannada', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: #0b0e14;
-            color: #f1f5f9;
+            background-color: #f8fafc;
+            color: #0f172a;
             line-height: 1.7;
             -webkit-font-smoothing: antialiased;
         }}
@@ -130,7 +130,7 @@ async def share_video_page(video_id: str):
             background: linear-gradient(135deg, #1AAA94 0%, #0D8975 100%);
             color: #ffffff;
             padding: 16px 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }}
         .header-container {{
             max-width: 680px;
@@ -150,7 +150,7 @@ async def share_video_page(video_id: str):
             font-weight: 800;
             font-size: 18px;
             color: #1AAA94;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
         }}
         .brand-title {{
             font-size: 20px;
@@ -172,7 +172,7 @@ async def share_video_page(video_id: str):
             background-color: #000000;
             border-radius: 16px;
             overflow: hidden;
-            box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
             margin-bottom: 20px;
             aspect-ratio: 16 / 9;
             position: relative;
@@ -184,17 +184,17 @@ async def share_video_page(video_id: str):
             object-fit: contain;
         }}
         .article-card {{
-            background-color: #131924;
+            background-color: #ffffff;
             border-radius: 16px;
             padding: 24px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-            border: 1px solid #1e293b;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
             margin-bottom: 24px;
         }}
         .article-title {{
             font-size: 22px;
             font-weight: 700;
-            color: #ffffff;
+            color: #0f172a;
             line-height: 1.4;
             margin-bottom: 14px;
         }}
@@ -205,7 +205,7 @@ async def share_video_page(video_id: str):
             gap: 10px;
             margin-bottom: 20px;
             padding-bottom: 16px;
-            border-bottom: 1px solid #1e293b;
+            border-bottom: 1px solid #f1f5f9;
         }}
         .badge {{
             display: inline-flex;
@@ -217,16 +217,16 @@ async def share_video_page(video_id: str):
             font-weight: 600;
         }}
         .badge-reporter {{
-            background-color: #1e293b;
-            color: #38bdf8;
+            background-color: #f1f5f9;
+            color: #334155;
         }}
         .badge-location {{
-            background-color: #064e3b;
-            color: #34d399;
+            background-color: #e6f7f3;
+            color: #0d8975;
         }}
         .content-paragraph {{
             font-size: 16px;
-            color: #e2e8f0;
+            color: #334155;
             line-height: 1.8;
             margin-bottom: 16px;
             word-break: break-word;
@@ -256,7 +256,7 @@ async def share_video_page(video_id: str):
             font-weight: 700;
             text-decoration: none;
             transition: transform 0.15s ease, opacity 0.15s ease;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
         }}
         .btn:active {{
             transform: scale(0.98);
@@ -272,7 +272,7 @@ async def share_video_page(video_id: str):
         footer {{
             text-align: center;
             font-size: 13px;
-            color: #94a3b8;
+            color: #64748b;
             margin-top: 24px;
         }}
         footer a {{
