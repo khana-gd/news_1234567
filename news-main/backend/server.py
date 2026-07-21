@@ -60,30 +60,66 @@ async def get_status_checks():
 async def share_video_page(video_id: str):
     video = None
     try:
-        if "cf_videos" in await db.list_collection_names():
-            video = await db.cf_videos.find_one({"id": video_id})
-        if not video and "videos" in await db.list_collection_names():
-            video = await db.videos.find_one({"id": video_id})
+        collections = await db.list_collection_names()
+        id_queries = [
+            {"id": video_id},
+            {"_id": video_id},
+            {"video_id": video_id},
+            {"cf_id": video_id}
+        ]
+        if video_id.isdigit():
+            id_queries.extend([{"id": int(video_id)}, {"_id": int(video_id)}])
+            
+        search_query = {"$or": id_queries}
+
+        priority_cols = ["cf_videos", "videos", "posts", "news_feed", "news", "articles"]
+        for col_name in priority_cols:
+            if col_name in collections:
+                video = await db[col_name].find_one(search_query)
+                if video:
+                    break
+        
+        if not video:
+            for col_name in collections:
+                if col_name not in priority_cols and not col_name.startswith("system."):
+                    video = await db[col_name].find_one(search_query)
+                    if video:
+                        break
     except Exception as e:
         logger.error(f"Error fetching video {video_id}: {e}")
 
-    # Fallback default content if video id not found in DB
-    title = video.get("title", "My Public Samachar - Local Video News") if video else "My Public Samachar News"
-    description = video.get("description", "Watch local video news from Karnataka on My Public Samachar.") if video else "Watch local video news from Karnataka on My Public Samachar."
-    video_url = video.get("video_url", "") if video else ""
-    thumb_url = video.get("thumb_url", "") if video else ""
-    reporter_name = video.get("reporter_name", "Public Samachar Reporter") if video else "Public Samachar"
-    location = video.get("location", "Karnataka") if video else "Karnataka"
+    title = ""
+    description = ""
+    video_url = ""
+    thumb_url = ""
+    reporter_name = ""
+    location = ""
 
-    safe_title = html.escape(title)
-    safe_desc = html.escape(description)
-    safe_reporter = html.escape(reporter_name)
-    safe_location = html.escape(location)
-    safe_video_url = html.escape(video_url)
-    safe_thumb_url = html.escape(thumb_url)
+    if video:
+        title = video.get("title") or video.get("name") or video.get("caption") or video.get("headline") or video.get("post_title") or ""
+        description = video.get("description") or video.get("content") or video.get("summary") or video.get("body") or video.get("text") or video.get("post_content") or ""
+        video_url = video.get("video_url") or video.get("videoUrl") or video.get("url") or video.get("src") or ""
+        thumb_url = video.get("thumb_url") or video.get("thumbUrl") or video.get("thumbnail") or video.get("poster") or video.get("image") or ""
+        reporter_name = video.get("reporter_name") or video.get("reporterName") or video.get("author") or video.get("reporter") or video.get("user") or ""
+        location = video.get("location") or video.get("place") or video.get("district") or video.get("city") or ""
 
-    # Format paragraphs for optimal reading experience
-    paragraphs = [p.strip() for p in description.split("\n") if p.strip()]
+    if not title:
+        title = "My Public Samachar - Local Video News"
+    if not description:
+        description = "Watch local video news from Karnataka on My Public Samachar."
+    if not reporter_name:
+        reporter_name = "Public Samachar"
+    if not location:
+        location = "Karnataka"
+
+    safe_title = html.escape(str(title))
+    safe_desc = html.escape(str(description))
+    safe_reporter = html.escape(str(reporter_name))
+    safe_location = html.escape(str(location))
+    safe_video_url = html.escape(str(video_url))
+    safe_thumb_url = html.escape(str(thumb_url))
+
+    paragraphs = [p.strip() for p in str(description).split("\n") if p.strip()]
     if not paragraphs:
         paragraphs = [safe_desc]
     
