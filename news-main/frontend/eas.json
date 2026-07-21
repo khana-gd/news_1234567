@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "version": ">= 18.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://mypublicsamachar.com/wp-json/wp/v2",
+        "EXPO_PUBLIC_BACKEND_URL": "https://public-samachar-api.onrender.com",
+        "EXPO_PUBLIC_YT_CHANNEL_ID": "UC8NATKQsfiBH78KT0symldg",
+        "EXPO_PUBLIC_PROJECT_ID": "4bbeff94-dd72-465a-8ab1-ea1a945bfdff"
+      }
+    },
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://mypublicsamachar.com/wp-json/wp/v2",
+        "EXPO_PUBLIC_BACKEND_URL": "https://public-samachar-api.onrender.com",
+        "EXPO_PUBLIC_YT_CHANNEL_ID": "UC8NATKQsfiBH78KT0symldg",
+        "EXPO_PUBLIC_PROJECT_ID": "4bbeff94-dd72-465a-8ab1-ea1a945bfdff"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
