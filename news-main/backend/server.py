@@ -56,6 +56,7 @@ async def get_status_checks():
     return [StatusCheck(**status_check) for status_check in status_checks]
 
 @api_router.get("/cf/share/{video_id}", response_class=HTMLResponse)
+@api_router.get("/og/{video_id}", response_class=HTMLResponse)
 async def share_video_page(video_id: str):
     video = None
     try:
@@ -120,8 +121,8 @@ async def share_video_page(video_id: str):
         }}
         body {{
             font-family: 'Noto Sans Kannada', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: #f8fafc;
-            color: #0f172a;
+            background-color: #0b0e14;
+            color: #f1f5f9;
             line-height: 1.7;
             -webkit-font-smoothing: antialiased;
         }}
@@ -129,7 +130,7 @@ async def share_video_page(video_id: str):
             background: linear-gradient(135deg, #1AAA94 0%, #0D8975 100%);
             color: #ffffff;
             padding: 16px 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }}
         .header-container {{
             max-width: 680px;
@@ -149,7 +150,7 @@ async def share_video_page(video_id: str):
             font-weight: 800;
             font-size: 18px;
             color: #1AAA94;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }}
         .brand-title {{
             font-size: 20px;
@@ -171,7 +172,7 @@ async def share_video_page(video_id: str):
             background-color: #000000;
             border-radius: 16px;
             overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            box-shadow: 0 6px 24px rgba(0,0,0,0.4);
             margin-bottom: 20px;
             aspect-ratio: 16 / 9;
             position: relative;
@@ -183,17 +184,17 @@ async def share_video_page(video_id: str):
             object-fit: contain;
         }}
         .article-card {{
-            background-color: #ffffff;
+            background-color: #131924;
             border-radius: 16px;
             padding: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
-            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+            border: 1px solid #1e293b;
             margin-bottom: 24px;
         }}
         .article-title {{
             font-size: 22px;
             font-weight: 700;
-            color: #0f172a;
+            color: #ffffff;
             line-height: 1.4;
             margin-bottom: 14px;
         }}
@@ -204,7 +205,7 @@ async def share_video_page(video_id: str):
             gap: 10px;
             margin-bottom: 20px;
             padding-bottom: 16px;
-            border-bottom: 1px solid #f1f5f9;
+            border-bottom: 1px solid #1e293b;
         }}
         .badge {{
             display: inline-flex;
@@ -216,16 +217,16 @@ async def share_video_page(video_id: str):
             font-weight: 600;
         }}
         .badge-reporter {{
-            background-color: #f1f5f9;
-            color: #334155;
+            background-color: #1e293b;
+            color: #38bdf8;
         }}
         .badge-location {{
-            background-color: #e6f7f3;
-            color: #0d8975;
+            background-color: #064e3b;
+            color: #34d399;
         }}
         .content-paragraph {{
             font-size: 16px;
-            color: #334155;
+            color: #e2e8f0;
             line-height: 1.8;
             margin-bottom: 16px;
             word-break: break-word;
@@ -237,7 +238,7 @@ async def share_video_page(video_id: str):
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
-            margin-top: 20px;
+            margin-top: 24px;
         }}
         @media (max-width: 480px) {{
             .action-buttons {{
@@ -255,7 +256,7 @@ async def share_video_page(video_id: str):
             font-weight: 700;
             text-decoration: none;
             transition: transform 0.15s ease, opacity 0.15s ease;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
         }}
         .btn:active {{
             transform: scale(0.98);
@@ -271,7 +272,7 @@ async def share_video_page(video_id: str):
         footer {{
             text-align: center;
             font-size: 13px;
-            color: #64748b;
+            color: #94a3b8;
             margin-top: 24px;
         }}
         footer a {{

@@ -122,7 +122,7 @@ export async function saveCFProfile(profile: Partial<CFProfile> & { id: string }
 }
 
 export function getCFOGUrl(cfId: string): string {
-  return `${WORKER_URL}/api/og/${cfId}`;
+  return `${WORKER_URL}/api/cf/share/${cfId}`;
 }
 
 export function getCFShareUrl(item: TikTokItem): string {
