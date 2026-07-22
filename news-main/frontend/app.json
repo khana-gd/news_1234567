@@ -33,7 +33,7 @@
         "backgroundColor": "#1AAA94"
       },
       "package": "com.publicsamachar.app",
-      "versionCode": 17,
+      "versionCode": 18,
       "jsEngine": "hermes",
       "edgeToEdgeEnabled": true,
       "permissions": [
