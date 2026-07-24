@@ -2169,8 +2169,8 @@ async def video_share_page(video_id: str):
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
+      background: #ffffff;
+      color: #111827;
       min-height: 100vh;
     }}
     /* ── Header ── */
@@ -2246,13 +2246,13 @@ async def video_share_page(video_id: str):
     /* ── Info ── */
     .info {{
       padding: 16px;
-      border-bottom: 1px solid rgba(255,255,255,0.07);
+      border-bottom: 1px solid #e5e7eb;
     }}
     .title-text {{
-      font-size: 18px;
+      font-size: 19px;
       font-weight: 800;
       line-height: 1.4;
-      color: #f0f6ff;
+      color: #111827;
       margin-bottom: 10px;
     }}
     .meta {{
@@ -2261,16 +2261,17 @@ async def video_share_page(video_id: str):
       gap: 8px;
       align-items: center;
       font-size: 13px;
-      color: #8b949e;
+      color: #4b5563;
     }}
-    .reporter {{ font-weight: 600; color: #79c0ff; }}
-    .location {{ color: #7ee787; }}
+    .reporter {{ font-weight: 600; color: #0D8975; }}
+    .location {{ color: #0D8975; font-weight: 600; }}
     .desc {{
-      font-size: 13px;
-      color: #8b949e;
-      line-height: 1.6;
-      padding: 12px 16px;
-      border-bottom: 1px solid rgba(255,255,255,0.07);
+      font-size: 15px;
+      color: #1f2937;
+      line-height: 1.8;
+      padding: 16px;
+      text-align: justify;
+      border-bottom: 1px solid #e5e7eb;
     }}
     /* ── Actions ── */
     .actions {{
@@ -2313,9 +2314,9 @@ async def video_share_page(video_id: str):
       text-align: center;
       padding: 16px;
       font-size: 12px;
-      color: #6e7681;
+      color: #4b5563;
     }}
-    .footer a {{ color: #79c0ff; text-decoration: none; }}
+    .footer a {{ color: #1AAA94; text-decoration: none; }}
     @media (max-width: 400px) {{
       .title-text {{ font-size: 16px; }}
       .btn-wa, .btn-download {{ font-size: 13px; padding: 11px 10px; }}
