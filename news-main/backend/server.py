@@ -1413,8 +1413,45 @@ def ensure_d1_tables():
 
 @api_router.get("/health")
 async def health_check():
-    """Simple liveness probe — returns 200 OK when the server is up."""
-    return {"status": "ok", "service": "public-samachar-backend"}
+    """Detailed health check: pings MongoDB with a timeout to verify connection."""
+    mongo_status = "connected"
+    mongo_error = None
+    try:
+        await asyncio.wait_for(client.admin.command('ping'), timeout=2.0)
+    except asyncio.TimeoutError:
+        mongo_status = "disconnected"
+        mongo_error = "Database ping timed out (2.0s)"
+        logger.error("Health check MongoDB ping timed out")
+    except Exception as e:
+        mongo_status = "disconnected"
+        mongo_error = str(e) or repr(e)
+        logger.error(f"Health check MongoDB ping failed: {mongo_error}")
+
+    if mongo_status == "connected":
+        return {
+            "status": "ok",
+            "service": "public-samachar-backend",
+            "services": {
+                "mongodb": {
+                    "status": "connected"
+                }
+            }
+        }
+    else:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "service": "public-samachar-backend",
+                "services": {
+                    "mongodb": {
+                        "status": "disconnected",
+                        "error": mongo_error
+                    }
+                }
+            }
+        )
+
 
 
 @api_router.get("/cf/videos")
@@ -1861,7 +1898,7 @@ async def download_page(request: Request):
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #f0f4ff;
+    background: #E6F7F3;
     min-height: 100vh;
     display: flex;
     align-items: center;
@@ -1882,7 +1919,7 @@ async def download_page(request: Request):
   .sub {{ color: #666; font-size: 14px; margin-bottom: 28px; }}
   .btn {{
     display: block;
-    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    background: linear-gradient(135deg, #1AAA94, #0D8975);
     color: #fff;
     text-decoration: none;
     padding: 16px 24px;
@@ -1895,7 +1932,8 @@ async def download_page(request: Request):
   .btn:active {{ opacity: 0.9; }}
   .size {{ color: #999; font-size: 13px; margin-bottom: 24px; }}
   .tips {{
-    background: #f8faff;
+    background: #FFFFFF;
+    border: 1px solid #B2E5DC;
     border-radius: 12px;
     padding: 16px;
     text-align: left;
@@ -2064,7 +2102,7 @@ async def video_share_page(video_id: str):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Video Not Found — Public Samachar</title>
-<style>*{{box-sizing:border-box;margin:0;padding:0}}body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4ff;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}}.card{{background:#fff;border-radius:20px;padding:40px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.1)}}.logo-circle{{width:64px;height:64px;border-radius:50%;background:#1565C0;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:26px;font-weight:900;color:#fff}}h1{{font-size:20px;color:#333;margin-bottom:8px}}p{{color:#888;font-size:14px;margin-bottom:24px}}.btn{{display:block;background:#1565C0;color:#fff;text-decoration:none;padding:14px 24px;border-radius:12px;font-size:15px;font-weight:700}}</style>
+<style>*{{box-sizing:border-box;margin:0;padding:0}}body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#E6F7F3;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}}.card{{background:#fff;border-radius:20px;padding:40px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.1)}}.logo-circle{{width:64px;height:64px;border-radius:50%;background:#1AAA94;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:26px;font-weight:900;color:#fff}}h1{{font-size:20px;color:#333;margin-bottom:8px}}p{{color:#888;font-size:14px;margin-bottom:24px}}.btn{{display:block;background:#1AAA94;color:#fff;text-decoration:none;padding:14px 24px;border-radius:12px;font-size:15px;font-weight:700}}</style>
 </head><body>
 <div class="card">
   <div class="logo-circle">PS</div>
@@ -2137,7 +2175,7 @@ async def video_share_page(video_id: str):
     }}
     /* ── Header ── */
     .header {{
-      background: #1565C0;
+      background: #1AAA94;
       padding: 12px 16px;
       display: flex;
       align-items: center;
@@ -2188,7 +2226,7 @@ async def video_share_page(video_id: str):
     .video-error .retry-btn {{
       display: inline-block;
       margin-top: 16px;
-      background: #1565C0;
+      background: #1AAA94;
       color: #fff;
       padding: 10px 24px;
       border-radius: 20px;
@@ -2262,7 +2300,7 @@ async def video_share_page(video_id: str):
       align-items: center;
       justify-content: center;
       gap: 8px;
-      background: #1565C0;
+      background: #1AAA94;
       color: #fff;
       text-decoration: none;
       padding: 13px 16px;

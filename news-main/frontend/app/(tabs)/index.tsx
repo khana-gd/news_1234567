@@ -1603,12 +1603,12 @@ const styles = StyleSheet.create({
   },
   qModalInput: {
     borderWidth: 1.5,
-    borderColor: '#D0E4FF',
+    borderColor: BRAND.primaryLight,
     borderRadius: 12,
     padding: 12,
     fontSize: 14,
     color: '#111',
-    backgroundColor: '#F8FBFF',
+    backgroundColor: BRAND.primarySoft,
     minHeight: 110,
     textAlignVertical: 'top',
   },
@@ -1642,7 +1642,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 13,
   },
-  qSaveBtnDisabled: { backgroundColor: '#90CAF9' },
+  qSaveBtnDisabled: { backgroundColor: BRAND.primaryLight },
   qSaveText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 
   // ── Ad Banner Yellow Gold (Reference Banner Style) ──────────────────────────

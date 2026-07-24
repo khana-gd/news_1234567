@@ -18,6 +18,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { BRAND } from '../constants/theme';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -633,10 +634,10 @@ const styles = StyleSheet.create({
   successSub:    { fontSize: 13, color: 'rgba(255,255,255,0.7)', textAlign: 'center', lineHeight: 20 },
   doneBtn:       { backgroundColor: '#1AAA94', borderRadius: 30, paddingVertical: 13, paddingHorizontal: 40, marginTop: 8 },
   doneTxt:       { color: '#fff', fontWeight: '800', fontSize: 16 },
-  shareUrlRow:   { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(21,101,192,0.12)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, width: '100%' },
-  shareUrlTxt:   { flex: 1, fontSize: 11, color: '#1AAA94', fontWeight: '600' },
-  copyBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#E6F7F3', borderRadius: 24, paddingVertical: 12, paddingHorizontal: 28, width: '100%', borderWidth: 1, borderColor: '#90CAF9' },
-  copyBtnTxt:    { color: '#1AAA94', fontWeight: '700', fontSize: 14 },
+  shareUrlRow:   { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: BRAND.primarySoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, width: '100%' },
+  shareUrlTxt:   { flex: 1, fontSize: 11, color: BRAND.primary, fontWeight: '600' },
+  copyBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: BRAND.primarySoft, borderRadius: 24, paddingVertical: 12, paddingHorizontal: 28, width: '100%', borderWidth: 1, borderColor: BRAND.primaryLight },
+  copyBtnTxt:    { color: BRAND.primary, fontWeight: '700', fontSize: 14 },
   waBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#25D366', borderRadius: 24, paddingVertical: 12, paddingHorizontal: 28, width: '100%' },
   waBtnTxt:      { color: '#fff', fontWeight: '700', fontSize: 14 },
 });
