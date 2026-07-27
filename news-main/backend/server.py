@@ -2176,13 +2176,18 @@ async def video_share_page(video_id: str):
     /* ── Header ── */
     .header {{
       background: #1AAA94;
-      padding: 12px 16px;
+      padding: 10px 16px;
       display: flex;
       align-items: center;
       gap: 10px;
       position: sticky;
-      top: 0;
+      top: 10px;
       z-index: 10;
+      max-width: 600px;
+      width: calc(100% - 32px);
+      margin: 10px auto;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }}
     .logo-circle {{
       width: 38px; height: 38px; border-radius: 50%;
@@ -2272,6 +2277,7 @@ async def video_share_page(video_id: str):
       padding: 16px;
       text-align: justify;
       border-bottom: 1px solid #e5e7eb;
+      white-space: pre-wrap;
     }}
     /* ── Actions ── */
     .actions {{
