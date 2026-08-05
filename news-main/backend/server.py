@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Request, Depends
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
@@ -1190,8 +1190,28 @@ def get_cf_headers():
 def d1_query(sql: str, params: list = None) -> list:
     """Execute SQL on Cloudflare D1 synchronously (use d1_query_async in FastAPI endpoints)."""
     if not CF_ACCOUNT_ID or not CF_API_TOKEN or not D1_DB_ID:
-        logger.warning("Cloudflare D1 credentials not configured")
-        return []
+        import sqlite3
+        try:
+            conn = sqlite3.connect("d1_local.db")
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if params:
+                cursor.execute(sql, params)
+            else:
+                cursor.execute(sql)
+            
+            if sql.strip().upper().startswith(("SELECT", "PRAGMA")):
+                rows = cursor.fetchall()
+                res = [dict(row) for row in rows]
+            else:
+                conn.commit()
+                res = []
+            conn.close()
+            return res
+        except Exception as e:
+            logger.error(f"Local SQLite query exception: {e}")
+            return []
+
     url = f'https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/d1/database/{D1_DB_ID}/query'
     body: dict = {'sql': sql}
     if params:
@@ -1213,8 +1233,9 @@ async def d1_query_async(sql: str, params: list = None) -> list:
     Handles 1000+ concurrent queries without thread exhaustion.
     """
     if not CF_ACCOUNT_ID or not CF_API_TOKEN or not D1_DB_ID:
-        logger.warning("Cloudflare D1 credentials not configured")
-        return []
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: d1_query(sql, params))
+
     url = f'https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/d1/database/{D1_DB_ID}/query'
     body: dict = {'sql': sql}
     if params:
@@ -1354,7 +1375,8 @@ def ensure_d1_tables():
             reporter_name TEXT DEFAULT 'Reporter',
             reporter_id TEXT DEFAULT 'reporter',
             timestamp INTEGER DEFAULT 0,
-            views INTEGER DEFAULT 0
+            views INTEGER DEFAULT 0,
+            aspect_ratio TEXT DEFAULT '16:9'
         )""",
         """CREATE TABLE IF NOT EXISTS user_profiles (
             id TEXT PRIMARY KEY,
@@ -1397,6 +1419,11 @@ def ensure_d1_tables():
             logger.info("Migrated: added caution_flag column to news_feed")
         else:
             logger.info("news_feed.caution_flag column already present — skipping")
+        if 'aspect_ratio' not in existing_cols:
+            d1_query("ALTER TABLE news_feed ADD COLUMN aspect_ratio TEXT DEFAULT '16:9'")
+            logger.info("Migrated: added aspect_ratio column to news_feed")
+        else:
+            logger.info("news_feed.aspect_ratio column already present — skipping")
     except Exception as e:
         logger.warning(f"news_feed migration check skipped: {e}")
     try:
@@ -1661,6 +1688,7 @@ async def save_video_meta(request: Request, _auth: dict = Depends(require_report
     reporter_name = data.get('reporter_name', 'Reporter').strip()
     reporter_id   = data.get('reporter_id', 'reporter').strip()
     thumb_key   = data.get('thumb_key', '').strip()   # R2 key for thumbnail (optional)
+    aspect_ratio = data.get('aspect_ratio', '16:9').strip()
 
     if not video_id or not video_key:
         raise HTTPException(status_code=400, detail="video_id and video_key are required")
@@ -1673,8 +1701,8 @@ async def save_video_meta(request: Request, _auth: dict = Depends(require_report
     ts = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     await d1_query_async(
-        'INSERT INTO news_feed (id, title, description, location, video_url, thumb_url, reporter_name, reporter_id, timestamp, caution_flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [video_id, title, description, location, video_key, thumb_key, reporter_name, reporter_id, ts, caution_flag]
+        'INSERT INTO news_feed (id, title, description, location, video_url, thumb_url, reporter_name, reporter_id, timestamp, caution_flag, aspect_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [video_id, title, description, location, video_key, thumb_key, reporter_name, reporter_id, ts, caution_flag, aspect_ratio]
     )
     logger.info(f"Video meta saved to D1: id={video_id}, key={video_key}, reporter={reporter_name}, caution={caution_flag}")
 
@@ -1723,6 +1751,7 @@ async def upload_cf_video(
     reporter_id: str = Form('reporter'),
     video: UploadFile = File(...),
     thumbnail: Optional[UploadFile] = File(None),
+    aspect_ratio: str = Form('16:9'),
     _auth: dict = Depends(require_reporter_jwt),
 ):
     """
@@ -1758,8 +1787,8 @@ async def upload_cf_video(
 
     # ── Save metadata to D1 ──────────────────────────────────────────────────
     await d1_query_async(
-        'INSERT INTO news_feed (id, title, description, location, video_url, thumb_url, reporter_name, reporter_id, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [video_id, title, description, location, video_key, thumb_key, reporter_name, reporter_id, ts]
+        'INSERT INTO news_feed (id, title, description, location, video_url, thumb_url, reporter_name, reporter_id, timestamp, aspect_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [video_id, title, description, location, video_key, thumb_key, reporter_name, reporter_id, ts, aspect_ratio]
     )
 
     video_url = f'{R2_PUBLIC_CDN}/{video_key}'
@@ -1977,6 +2006,18 @@ async def download_page(request: Request):
     return HTMLResponse(content=html)
 
 
+@api_router.get("/logo.png")
+async def get_logo():
+    logo_path = Path(__file__).parent / "logo.png"
+    if logo_path.exists():
+        return FileResponse(logo_path, media_type="image/png")
+    # Fallback to frontend directory during local development
+    frontend_logo_path = Path(__file__).parent.parent / "frontend" / "assets" / "images" / "logo.png"
+    if frontend_logo_path.exists():
+        return FileResponse(frontend_logo_path, media_type="image/png")
+    raise HTTPException(status_code=404, detail="Logo not found")
+
+
 @api_router.get("/cf/share/{video_id}", response_class=HTMLResponse)
 @api_router.get("/og/{video_id}", response_class=HTMLResponse)
 async def video_share_page(video_id: str):
@@ -2143,11 +2184,56 @@ async def video_share_page(video_id: str):
     share_url_e   = _E(share_url)
     wa_url_e      = _E(wa_url)
     download_url_e = _E(download_url)
+    logo_url      = f"{BACKEND_URL}/api/logo.png"
+    logo_url_e    = _E(logo_url)
 
     thumb_meta  = f'<meta property="og:image" content="{thumb_url_e}">' if thumb_url else ''
     caution_bar = '''<div class="caution-bar">⚠️ This content has not been independently verified</div>''' if caution else ''
     location_html = f'<span class="location">📍 {location_e}</span>' if location else ''
     desc_html   = f'<p class="desc">{description_e}</p>' if description else ''
+
+    # ── PERFORMANCE: Dynamic preconnect links ──
+    import urllib.parse
+    preconnect_html = ""
+    if video_url:
+        try:
+            parsed_url = urllib.parse.urlparse(video_url)
+            if parsed_url.netloc:
+                preconnect_html = (
+                    f'  <link rel="preconnect" href="{parsed_url.scheme}://{parsed_url.netloc}">\n'
+                    f'  <link rel="dns-prefetch" href="{parsed_url.scheme}://{parsed_url.netloc}">'
+                )
+        except Exception:
+            pass
+
+    # ── DYNAMIC PLAYER & AUTOPLAY SELECTION ──
+    is_youtube = "youtube.com" in video_url or "youtu.be" in video_url
+    if is_youtube:
+        embed_url = video_url
+        if "?" in embed_url:
+            embed_url += "&autoplay=1&mute=1"
+        else:
+            embed_url += "?autoplay=1&mute=1"
+        player_html = f"""<iframe
+        id="vid"
+        src="{html_lib.escape(embed_url, quote=True)}"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowfullscreen
+      ></iframe>"""
+    else:
+        poster_attr = f" poster='{thumb_url_e}'" if thumb_url else ""
+        player_html = f"""<video
+        id="vid"
+        preload="auto"
+        controls
+        playsinline
+        autoplay
+        muted
+        {poster_attr}
+      >
+        <source src="{video_url_e}" type="video/mp4">
+        Your browser does not support HTML5 video.
+      </video>"""
 
     html = f"""<!DOCTYPE html>
 <html lang="hi">
@@ -2155,6 +2241,7 @@ async def video_share_page(video_id: str):
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>{title_e} — Public Samachar</title>
+  {preconnect_html}
   <meta name="description" content="{description_e or title_e}">
   <!-- Open Graph / WhatsApp preview -->
   <meta property="og:type"        content="video.other">
@@ -2213,11 +2300,30 @@ async def video_share_page(video_id: str):
       background: #000;
       width: 100%;
     }}
+    .video-logo {{
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 50px;
+      height: auto;
+      z-index: 5;
+      pointer-events: none;
+      opacity: 0.85;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+    }}
     video {{
       display: block;
       width: 100%;
       max-height: 70vh;
       background: #000;
+    }}
+    iframe {{
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      max-height: 70vh;
+      background: #000;
+      border: none;
     }}
     .video-error {{
       display: none;
@@ -2342,16 +2448,8 @@ async def video_share_page(video_id: str):
   <div class="content">
     <!-- Video Player -->
     <div class="video-wrap">
-      <video
-        id="vid"
-        preload="metadata"
-        controls
-        playsinline
-        {"poster='"+thumb_url_e+"'" if thumb_url else ""}
-      >
-        <source src="{video_url_e}" type="video/mp4">
-        Your browser does not support HTML5 video.
-      </video>
+      {player_html}
+      <img src="{logo_url_e}" class="video-logo" alt="Public Samachar Logo">
       <!-- Error fallback -->
       <div class="video-error" id="vid-error">
         <div class="err-icon">📺</div>
@@ -2409,6 +2507,40 @@ async def video_share_page(video_id: str):
           errDiv.style.display = 'block';
         }});
       }}
+
+      // Play on user interaction if autoplay is blocked
+      if (vid.tagName === 'VIDEO') {{
+        // Auto-unmute on first user interaction anywhere on the page/player
+        var unmuteAndPlay = function() {{
+          if (vid.muted) {{
+            vid.muted = false;
+            vid.play().catch(function(e) {{
+              console.log("Play failed on unmute:", e);
+            }});
+          }}
+          document.removeEventListener('click', unmuteAndPlay);
+          document.removeEventListener('touchstart', unmuteAndPlay);
+        }};
+        document.addEventListener('click', unmuteAndPlay);
+        document.addEventListener('touchstart', unmuteAndPlay);
+
+        var playPromise = vid.play();
+        if (playPromise !== undefined) {{
+          playPromise.catch(function(error) {{
+            console.log("Autoplay prevented:", error);
+            // Fallback: Play on first touch/click anywhere on the page
+            var startPlay = function() {{
+              vid.play().catch(function(e) {{
+                console.log("Play failed on interaction:", e);
+              }});
+              document.removeEventListener('click', startPlay);
+              document.removeEventListener('touchstart', startPlay);
+            }};
+            document.addEventListener('click', startPlay);
+            document.addEventListener('touchstart', startPlay);
+          }});
+        }}
+      }}
     }}
   </script>
 </body>
@@ -2422,6 +2554,7 @@ async def video_share_page(video_id: str):
         "media-src 'self' https:; "
         "style-src 'self' 'unsafe-inline'; "
         "script-src 'self' 'unsafe-inline'; "
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "frame-ancestors 'none'"
@@ -2567,6 +2700,750 @@ async def resolve_flag(flag_id: str, _admin: bool = Depends(require_admin_code))
     )
     logger.info(f"Flag {flag_id} resolved by admin")
     return {"success": True, "flag_id": flag_id, "status": "resolved"}
+
+
+@api_router.post("/admin/cleanup-old-videos")
+async def cleanup_old_videos(days: int = 30, _admin: bool = Depends(require_admin_code)):
+    """Admin-only: Delete videos older than N days from both database (D1) and Cloudflare R2."""
+    if days < 0:
+        raise HTTPException(status_code=400, detail="Days parameter must be 0 or positive")
+    
+    # Calculate threshold (in ms since epoch)
+    threshold_ts = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
+    
+    # Get all video records older than threshold
+    old_videos = await d1_query_async(
+        "SELECT id, video_url, thumb_url FROM news_feed WHERE timestamp < ?",
+        [threshold_ts]
+    )
+    
+    if not old_videos:
+        return {"success": True, "count": 0, "message": f"No videos found older than {days} days"}
+        
+    deleted_count = 0
+    loop = asyncio.get_event_loop()
+    
+    for v in old_videos:
+        video_id = v.get("id")
+        if not video_id:
+            continue
+            
+        # 1. Delete R2 files asynchronously if credentials configured
+        try:
+            # Delete video mp4
+            video_url = v.get("video_url")
+            if video_url:
+                video_filename = video_url.split('/')[-1]
+                logger.info(f"Deleting video R2 asset: {video_filename}")
+                await loop.run_in_executor(
+                    None,
+                    lambda: boto3.client(
+                        's3',
+                        endpoint_url=R2_ENDPOINT_URL,
+                        aws_access_key_id=CF_ACCESS_KEY_ID,
+                        aws_secret_access_key=CF_SECRET_ACCESS_KEY,
+                        config=Config(signature_version='s3v4')
+                    ).delete_object(Bucket=R2_BUCKET_NAME, Key=video_filename)
+                )
+                
+            # Delete thumbnail jpg
+            thumb_url = v.get("thumb_url")
+            if thumb_url:
+                thumb_filename = thumb_url.split('/')[-1]
+                logger.info(f"Deleting thumbnail R2 asset: {thumb_filename}")
+                await loop.run_in_executor(
+                    None,
+                    lambda: boto3.client(
+                        's3',
+                        endpoint_url=R2_ENDPOINT_URL,
+                        aws_access_key_id=CF_ACCESS_KEY_ID,
+                        aws_secret_access_key=CF_SECRET_ACCESS_KEY,
+                        config=Config(signature_version='s3v4')
+                    ).delete_object(Bucket=R2_BUCKET_NAME, Key=thumb_filename)
+                )
+        except Exception as e:
+            logger.error(f"Error deleting R2 files for video {video_id}: {e}")
+            
+        # 2. Delete database records from D1
+        await d1_query_async("DELETE FROM news_feed WHERE id = ?", [video_id])
+        await d1_query_async("DELETE FROM ps_comments WHERE video_id = ?", [video_id])
+        await d1_query_async("DELETE FROM flagged_videos WHERE video_id = ?", [video_id])
+        deleted_count += 1
+        
+    logger.info(f"Cleanup run: deleted {deleted_count} videos older than {days} days")
+    return {"success": True, "count": deleted_count, "message": f"Successfully deleted {deleted_count} videos"}
+
+
+@api_router.delete("/cf/videos/{video_id}")
+async def delete_cf_video(video_id: str, _admin: bool = Depends(require_admin_code)):
+    """Admin-only: delete a video from D1 & R2. Requires X-Admin-Code header."""
+    clean_id = video_id
+    if clean_id.startswith("cf_"):
+        clean_id = clean_id[3:]
+
+    # Fetch metadata to find video & thumb keys
+    results = await d1_query_async("SELECT * FROM news_feed WHERE id = ?", [clean_id])
+    if not results and video_id != clean_id:
+        results = await d1_query_async("SELECT * FROM news_feed WHERE id = ?", [video_id])
+        if results:
+            clean_id = video_id
+
+    # Determine R2 keys
+    video_key = f"news_feed/videos/{clean_id}.mp4"
+    thumb_key = f"news_feed/thumbs/{clean_id}.jpg"
+    if results:
+        v_meta = results[0]
+        if v_meta.get("video_url"):
+            vk = v_meta["video_url"]
+            if "/" in vk and vk.startswith("http"):
+                video_key = vk.split(".dev/")[-1].split(".com/")[-1]
+            else:
+                video_key = vk
+        if v_meta.get("thumb_url"):
+            tk = v_meta["thumb_url"]
+            if "/" in tk and tk.startswith("http"):
+                thumb_key = tk.split(".dev/")[-1].split(".com/")[-1]
+            else:
+                thumb_key = tk
+
+    # 1. Delete from R2
+    if CF_ACCOUNT_ID and CF_API_TOKEN:
+        try:
+            s3 = get_r2_s3_client()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: s3.delete_object(Bucket=R2_BUCKET_NAME, Key=video_key))
+            if thumb_key:
+                await loop.run_in_executor(None, lambda: s3.delete_object(Bucket=R2_BUCKET_NAME, Key=thumb_key))
+            logger.info(f"Video {clean_id} files deleted from R2")
+        except Exception as e:
+            logger.warning(f"R2 files delete warning for video {clean_id}: {e}")
+
+    # 2. Delete from D1
+    await d1_query_async("DELETE FROM news_feed WHERE id = ?", [clean_id])
+    await d1_query_async("DELETE FROM ps_comments WHERE video_id = ?", [clean_id])
+    await d1_query_async("DELETE FROM flagged_videos WHERE video_id = ?", [clean_id])
+    logger.info(f"Video {clean_id} records deleted from D1 by admin")
+    return {"success": True, "video_id": clean_id}
+
+
+@api_router.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard():
+    """Secure Web Admin Console for video deletion and content moderation."""
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Console — Public Samachar</title>
+  <style>
+    :root {
+      --primary: #1AAA94;
+      --primary-dark: #0D8975;
+      --primary-soft: rgba(26, 170, 148, 0.15);
+      --danger: #EF4444;
+      --danger-dark: #DC2626;
+      --bg: #0F172A;
+      --card-bg: #1E293B;
+      --text: #F8FAFC;
+      --text-muted: #94A3B8;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background-color: #0B0F19;
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo-section { display: flex; align-items: center; gap: 12px; }
+    .logo-circle {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 20px; color: #fff;
+      box-shadow: 0 4px 10px rgba(26,170,148,0.3);
+    }
+    .title-area h1 { font-size: 18px; font-weight: 800; letter-spacing: 0.5px; }
+    .title-area p { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+    .btn {
+      padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
+      cursor: pointer; border: none; transition: all 0.2s; display: inline-flex;
+      align-items: center; justify-content: center; gap: 8px; text-decoration: none;
+      outline: none;
+    }
+    .btn-primary { background-color: var(--primary); color: #fff; }
+    .btn-primary:hover { background-color: var(--primary-dark); transform: translateY(-1px); }
+    .btn-danger { background-color: var(--danger); color: #fff; }
+    .btn-danger:hover { background-color: var(--danger-dark); transform: translateY(-1px); }
+    .btn-outline { background-color: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-outline:hover { background-color: var(--card-bg); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+    
+    .container { max-width: 1200px; width: 100%; margin: 28px auto; padding: 0 24px; flex: 1; display: flex; flex-direction: column; }
+    
+    /* Tabs */
+    .tabs-bar { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 28px; }
+    .tabs { display: flex; gap: 12px; }
+    .tab-btn {
+      background: none; border: none; color: var(--text-muted); font-size: 15px; font-weight: 700;
+      padding: 10px 20px; cursor: pointer; transition: all 0.2s; border-radius: 8px;
+    }
+    .tab-btn:hover { color: var(--text); background-color: var(--card-bg); }
+    .tab-btn.active { color: #fff; background-color: var(--primary); }
+    
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
+    
+    /* Grid */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; }
+    .card { background-color: var(--card-bg); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); display: flex; flex-direction: column; transition: transform 0.2s, box-shadow 0.2s; }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 12px 20px rgba(0,0,0,0.3); }
+    
+    .video-thumb-wrap { position: relative; width: 100%; aspect-ratio: 16/9; background-color: #000; cursor: pointer; overflow: hidden; }
+    .video-thumb-wrap.portrait { aspect-ratio: 9/16; max-height: 400px; }
+    .thumb-img { width: 100%; height: 100%; object-fit: cover; }
+    .thumb-placeholder { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 32px; background-color: #111; gap: 8px; color: var(--text-muted); }
+    .thumb-placeholder p { font-size: 12px; }
+    .play-overlay {
+      position: absolute; inset: 0; background-color: rgba(0,0,0,0.4);
+      display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;
+    }
+    .video-thumb-wrap:hover .play-overlay { opacity: 1; }
+    .play-btn-circle {
+      width: 52px; height: 52px; border-radius: 50%; background-color: var(--primary);
+      display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff;
+      box-shadow: 0 4px 15px rgba(26,170,148,0.4);
+    }
+    
+    .card-body { padding: 18px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+    .card-title { font-size: 16px; font-weight: 700; line-height: 1.4; color: var(--text); }
+    .card-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-muted); align-items: center; }
+    .badge { padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 10px; background-color: var(--border); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge-teal { background-color: var(--primary-soft); color: var(--primary); }
+    .badge-danger { background-color: rgba(239,68,68,0.15); color: var(--danger); }
+    .card-desc { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .card-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+    
+    /* Login Modal Overlay */
+    .modal-overlay {
+      position: fixed; inset: 0; background-color: rgba(15, 23, 42, 0.95);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+      opacity: 0; pointer-events: none; transition: opacity 0.25s ease-out;
+    }
+    .modal-overlay.active { opacity: 1; pointer-events: auto; }
+    .modal {
+      background-color: var(--card-bg); border-radius: 18px; border: 1px solid var(--border);
+      max-width: 440px; width: 100%; padding: 32px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      position: relative;
+    }
+    .modal-title { font-size: 20px; font-weight: 800; margin-bottom: 20px; text-align: center; letter-spacing: 0.5px; }
+    .form-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+    .form-group label { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+    .form-input {
+      padding: 14px; border-radius: 10px; border: 1px solid var(--border); background-color: var(--bg);
+      color: #fff; font-size: 16px; outline: none; transition: border-color 0.2s;
+    }
+    .form-input:focus { border-color: var(--primary); }
+    .login-error { color: var(--danger); font-size: 13px; margin-top: -10px; margin-bottom: 15px; display: none; text-align: center; font-weight: 600; }
+    
+    /* Video Player Modal */
+    .player-modal { max-width: 800px; padding: 24px; text-align: center; }
+    .player-modal video { width: 100%; aspect-ratio: 16/9; border-radius: 10px; background-color: #000; outline: none; }
+    .player-modal video.portrait { aspect-ratio: 9/16; max-height: 70vh; width: auto; margin: 0 auto; }
+    .player-modal-title { font-size: 16px; font-weight: 700; margin-top: 14px; text-align: left; }
+    .close-modal-btn { position: absolute; top: 12px; right: 16px; background: none; border: none; color: var(--text-muted); font-size: 28px; cursor: pointer; transition: color 0.2s; }
+    .close-modal-btn:hover { color: #fff; }
+    
+    /* Toast Notifications */
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
+    .toast {
+      background-color: var(--card-bg); border: 1px solid var(--border); color: #fff;
+      padding: 14px 24px; border-radius: 10px; font-size: 14.5px; font-weight: 600;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); border-left: 5px solid var(--primary);
+      animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .toast.error { border-left-color: var(--danger); }
+    
+    /* Empty & Loader States */
+    .loader { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 80px 0; color: var(--text-muted); }
+    .spinner { width: 36px; height: 36px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 80px 24px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 14px; background-color: rgba(30, 41, 59, 0.2); }
+    .empty-state-icon { font-size: 48px; }
+    
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes slideIn { from { transform: translateX(100%) translateY(0); opacity: 0; } to { transform: translateX(0) translateY(0); opacity: 1; } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo-section">
+      <div class="logo-circle">PS</div>
+      <div class="title-area">
+        <h1>Public Samachar</h1>
+        <p>Admin Moderation & Content Management</p>
+      </div>
+    </div>
+    <div class="header-actions" style="display: flex; align-items: center; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+        <label for="cleanupDays" style="color: var(--text-muted); font-weight: 600;">Keep (Days):</label>
+        <input type="number" id="cleanupDays" value="30" min="0" style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background-color: var(--bg); color: #fff; width: 70px; outline: none; font-size: 13px;">
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="runStorageCleanup()">🧹 Clean Old</button>
+      <button class="btn btn-outline" id="logoutBtn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Tabs Navigation -->
+    <div class="tabs-bar">
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('flagsTab', this)">⚠️ Review Flags</button>
+        <button class="tab-btn" onclick="switchTab('videosTab', this)">📺 All Video Feed</button>
+      </div>
+      <div id="statusIndicator" style="font-size: 13px; color: var(--text-muted);">
+        Authenticated As Admin
+      </div>
+    </div>
+
+    <!-- Review Flags Content -->
+    <div id="flagsTab" class="tab-content active">
+      <div id="flagsLoader" class="loader">
+        <div class="spinner"></div>
+        <p>Loading flags and checking video metadata...</p>
+      </div>
+      <div id="flagsEmpty" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">✅</div>
+        <h2>All Clear!</h2>
+        <p>There are no flagged videos pending review right now.</p>
+      </div>
+      <div class="grid" id="flagsGrid"></div>
+    </div>
+
+    <!-- All Video Feed Content -->
+    <div id="videosTab" class="tab-content">
+      <div id="videosLoader" class="loader">
+        <div class="spinner"></div>
+        <p>Loading video feed from Cloudflare D1...</p>
+      </div>
+      <div id="videosEmpty" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">🎥</div>
+        <h2>No Videos Found</h2>
+        <p>No video uploads have been registered in the database yet.</p>
+      </div>
+      <div class="grid" id="videosGrid"></div>
+    </div>
+  </div>
+
+  <!-- Login Modal Overlay -->
+  <div class="modal-overlay active" id="loginOverlay">
+    <div class="modal">
+      <div class="logo-circle" style="margin: 0 auto 16px;">PS</div>
+      <div class="modal-title">Admin Access Code</div>
+      <div class="login-error" id="loginError">Invalid admin access code. Please try again.</div>
+      <form onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="adminCode">ENTER ADMIN CODE</label>
+          <input type="password" id="adminCode" class="form-input" placeholder="••••••••" required autofocus>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 14px;">Authenticate & Unlock</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Video Player Modal Overlay -->
+  <div class="modal-overlay" id="playerOverlay" onclick="closePlayerModal()">
+    <div class="modal player-modal" onclick="event.stopPropagation()">
+      <button class="close-modal-btn" onclick="closePlayerModal()">&times;</button>
+      <div id="videoContainer"></div>
+      <div class="player-modal-title" id="playerModalTitle"></div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    let activeTab = 'flagsTab';
+    
+    // Check for saved access code
+    document.addEventListener('DOMContentLoaded', () => {
+      const code = localStorage.getItem('ps_admin_code');
+      if (code) {
+        document.getElementById('loginOverlay').classList.remove('active');
+        loadAllData();
+      }
+    });
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type === 'error' ? 'error' : ''}`;
+      toast.innerHTML = type === 'error' ? `❌ ${message}` : `✅ ${message}`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.animation = 'none';
+        toast.offsetHeight; // trigger reflow
+        toast.style.animation = 'slideIn 0.25s reverse forwards';
+        setTimeout(() => toast.remove(), 250);
+      }, 3500);
+    }
+
+    function handleLogin(e) {
+      e.preventDefault();
+      const code = document.getElementById('adminCode').value.trim();
+      if (!code) return;
+      
+      // Attempt verification by making a test API call to /admin/flagged-videos
+      fetch('/api/admin/flagged-videos', {
+        headers: { 'X-Admin-Code': code }
+      })
+      .then(resp => {
+        if (resp.ok) {
+          localStorage.setItem('ps_admin_code', code);
+          document.getElementById('loginOverlay').classList.remove('active');
+          document.getElementById('loginError').style.display = 'none';
+          document.getElementById('adminCode').value = '';
+          showToast('Authentication successful!');
+          loadAllData();
+        } else {
+          document.getElementById('loginError').style.display = 'block';
+        }
+      })
+      .catch(() => {
+        document.getElementById('loginError').textContent = 'Network error. Please try again.';
+        document.getElementById('loginError').style.display = 'block';
+      });
+    }
+
+    function logout() {
+      localStorage.removeItem('ps_admin_code');
+      document.getElementById('loginOverlay').classList.add('active');
+      document.getElementById('flagsGrid').innerHTML = '';
+      document.getElementById('videosGrid').innerHTML = '';
+      showToast('Logged out successfully.');
+    }
+
+    function switchTab(tabId, btn) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+      activeTab = tabId;
+    }
+
+    function getAuthHeaders() {
+      const code = localStorage.getItem('ps_admin_code');
+      return { 'X-Admin-Code': code || '' };
+    }
+
+    function loadAllData() {
+      loadFlags();
+      loadVideos();
+    }
+
+    async function loadFlags() {
+      const grid = document.getElementById('flagsGrid');
+      const loader = document.getElementById('flagsLoader');
+      const emptyState = document.getElementById('flagsEmpty');
+      
+      grid.innerHTML = '';
+      loader.style.display = 'flex';
+      emptyState.style.display = 'none';
+      
+      try {
+        const resp = await fetch('/api/admin/flagged-videos', { headers: getAuthHeaders() });
+        if (resp.status === 403) {
+          logout();
+          return;
+        }
+        if (!resp.ok) throw new Error('Failed to load flags');
+        
+        const data = await resp.json();
+        const pendingFlags = (data.flags || []).filter(f => f.status === 'pending');
+        
+        if (pendingFlags.length === 0) {
+          loader.style.display = 'none';
+          emptyState.style.display = 'flex';
+          return;
+        }
+        
+        loader.style.display = 'none';
+        
+        for (const flag of pendingFlags) {
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.id = `flag-card-${flag.id}`;
+          
+          // Place loading placeholder
+          card.innerHTML = `
+            <div class="card-body">
+              <div class="card-meta">
+                <span class="badge badge-danger">FLAGGED: ${escapeHTML(flag.reason)}</span>
+              </div>
+              <p style="font-size:12px; color:var(--text-muted);">Loading video metadata (ID: ${flag.video_id})...</p>
+            </div>
+          `;
+          grid.appendChild(card);
+          
+          // Fetch video details in background
+          fetchVideoDetails(flag.video_id).then(video => {
+            if (video) {
+              const isPortrait = video.aspect_ratio === '9:16';
+              card.innerHTML = `
+                <div class="video-thumb-wrap ${isPortrait ? 'portrait' : ''}" onclick="playVideo('${escapeJS(video.video_url)}', '${escapeJS(video.title)}', ${isPortrait})">
+                  ${video.thumb_url ? `<img src="${video.thumb_url}" class="thumb-img" alt="Video thumbnail">` : `
+                    <div class="thumb-placeholder">
+                      🎥
+                      <p>No Thumbnail</p>
+                    </div>
+                  `}
+                  <div class="play-overlay">
+                    <div class="play-btn-circle">▶</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="card-meta">
+                    <span class="badge badge-danger">FLAGGED: ${escapeHTML(flag.reason)}</span>
+                    <span class="badge badge-teal">${escapeHTML(video.location || 'Karnataka')}</span>
+                    ${isPortrait ? '<span class="badge">Portrait 9:16</span>' : '<span class="badge">Landscape 16:9</span>'}
+                  </div>
+                  <h3 class="card-title">${escapeHTML(video.title)}</h3>
+                  <div class="card-meta">
+                    <span>👤 ${escapeHTML(video.reporter_name)}</span>
+                    <span>•</span>
+                    <span>${new Date(video.timestamp).toLocaleDateString()}</span>
+                  </div>
+                  <p class="card-desc">${escapeHTML(video.description || 'No description.')}</p>
+                  <div class="card-actions">
+                    <button class="btn btn-outline btn-sm" onclick="dismissFlag('${flag.id}')" style="flex:1;">✅ Mark Safe</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteVideo('${video.id}', '${flag.id}')" style="flex:1;">🗑️ Delete Video</button>
+                  </div>
+                </div>
+              `;
+            } else {
+              card.innerHTML = `
+                <div class="card-body">
+                  <div class="card-meta">
+                    <span class="badge badge-danger">FLAGGED: ${escapeHTML(flag.reason)}</span>
+                  </div>
+                  <h3 class="card-title" style="color:var(--danger)">Video Already Deleted or Not Found</h3>
+                  <p class="card-desc">The database contains a moderation flag, but the video record (ID: ${flag.video_id}) is no longer in the feed.</p>
+                  <div class="card-actions">
+                    <button class="btn btn-outline btn-sm" onclick="dismissFlag('${flag.id}')" style="width:100%;">Dismiss Flag Record</button>
+                  </div>
+                </div>
+              `;
+            }
+          });
+        }
+      } catch (e) {
+        loader.style.display = 'none';
+        showToast('Error loading flagged videos', 'error');
+      }
+    }
+
+    async function loadVideos() {
+      const grid = document.getElementById('videosGrid');
+      const loader = document.getElementById('videosLoader');
+      const emptyState = document.getElementById('videosEmpty');
+      
+      grid.innerHTML = '';
+      loader.style.display = 'flex';
+      emptyState.style.display = 'none';
+      
+      try {
+        const resp = await fetch('/api/cf/videos?page=1&limit=100');
+        if (!resp.ok) throw new Error('Failed to load video feed');
+        
+        const data = await resp.json();
+        const videos = data.videos || [];
+        
+        if (videos.length === 0) {
+          loader.style.display = 'none';
+          emptyState.style.display = 'flex';
+          return;
+        }
+        
+        loader.style.display = 'none';
+        
+        videos.forEach(video => {
+          const isPortrait = video.aspect_ratio === '9:16';
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.id = `video-card-${video.id}`;
+          
+          card.innerHTML = `
+            <div class="video-thumb-wrap ${isPortrait ? 'portrait' : ''}" onclick="playVideo('${escapeJS(video.video_url)}', '${escapeJS(video.title)}', ${isPortrait})">
+              ${video.thumb_url ? `<img src="${video.thumb_url}" class="thumb-img" alt="Video thumbnail">` : `
+                <div class="thumb-placeholder">
+                  🎥
+                  <p>No Thumbnail</p>
+                </div>
+              `}
+              <div class="play-overlay">
+                <div class="play-btn-circle">▶</div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="card-meta">
+                <span class="badge badge-teal">${escapeHTML(video.location || 'Karnataka')}</span>
+                <span>👀 ${video.views || 0} Views</span>
+                ${isPortrait ? '<span class="badge">Portrait 9:16</span>' : '<span class="badge">Landscape 16:9</span>'}
+              </div>
+              <h3 class="card-title">${escapeHTML(video.title)}</h3>
+              <div class="card-meta">
+                <span>👤 ${escapeHTML(video.reporter_name)}</span>
+                <span>•</span>
+                <span>${new Date(video.timestamp).toLocaleDateString()}</span>
+              </div>
+              <p class="card-desc">${escapeHTML(video.description || 'No description.')}</p>
+              <div class="card-actions">
+                <button class="btn btn-danger btn-sm" onclick="deleteVideo('${video.id}')" style="width:100%;">🗑️ Delete Video</button>
+              </div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      } catch (e) {
+        loader.style.display = 'none';
+        showToast('Error loading video feed', 'error');
+      }
+    }
+
+    async function fetchVideoDetails(videoId) {
+      try {
+        const resp = await fetch(`/api/cf/post/${videoId}`);
+        if (resp.ok) {
+          return await resp.json();
+        }
+      } catch {}
+      return null;
+    }
+
+    async function dismissFlag(flagId) {
+      if (!confirm('Are you sure you want to dismiss this flag and mark this video as safe?')) return;
+      try {
+        const resp = await fetch(`/api/admin/resolve-flag/${flagId}`, {
+          method: 'POST',
+          headers: getAuthHeaders()
+        });
+        if (resp.ok) {
+          showToast('Flag resolved and dismissed.');
+          loadFlags();
+        } else {
+          showToast('Failed to resolve flag.', 'error');
+        }
+      } catch {
+        showToast('Network error resolving flag.', 'error');
+      }
+    }
+
+    async function deleteVideo(videoId, flagId = null) {
+      if (!confirm('🚨 WARNING: This will permanently delete the video file from Cloudflare R2 and remove all entries from D1 (including comments/flags). Are you sure?')) return;
+      try {
+        const resp = await fetch(`/api/cf/videos/${videoId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        if (resp.ok) {
+          showToast('Video permanently deleted.');
+          if (flagId) {
+            loadAllData();
+          } else {
+            const el = document.getElementById(`video-card-${videoId}`);
+            if (el) el.remove();
+            loadFlags();
+          }
+        } else {
+          const data = await resp.json().catch(() => ({}));
+          showToast(data.detail || 'Failed to delete video.', 'error');
+        }
+      } catch {
+        showToast('Network error deleting video.', 'error');
+      }
+    }
+
+    function playVideo(url, title, isPortrait) {
+      const container = document.getElementById('videoContainer');
+      const titleEl = document.getElementById('playerModalTitle');
+      
+      container.innerHTML = `
+        <video controls autoplay class="${isPortrait ? 'portrait' : ''}">
+          <source src="${url}" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      `;
+      titleEl.textContent = title;
+      document.getElementById('playerOverlay').classList.add('active');
+    }
+
+    function closePlayerModal() {
+      document.getElementById('playerOverlay').classList.remove('active');
+      document.getElementById('videoContainer').innerHTML = '';
+    }
+
+    async function runStorageCleanup() {
+      const days = document.getElementById('cleanupDays').value;
+      if (days === '' || days < 0) {
+        showToast('Please enter a valid non-negative number of days.', 'error');
+        return;
+      }
+      
+      const confirmMsg = `🚨 WARNING: This will permanently delete ALL videos older than ${days} days from database and storage. This action CANNOT be undone. Are you sure you want to proceed?`;
+      if (!confirm(confirmMsg)) return;
+      
+      showToast('Running cleanup, please wait...');
+      
+      try {
+        const resp = await fetch(`/api/admin/cleanup-old-videos?days=${days}`, {
+          method: 'POST',
+          headers: getAuthHeaders()
+        });
+        
+        if (resp.ok) {
+          const data = await resp.json();
+          showToast(`Cleanup complete! Deleted ${data.count} old videos.`);
+          loadAllData();
+        } else {
+          const data = await resp.json().catch(() => ({}));
+          showToast(data.detail || 'Failed to run cleanup.', 'error');
+        }
+      } catch (e) {
+        showToast('Network error running cleanup.', 'error');
+      }
+    }
+
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str.replace(/[&<>'"]/g, 
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+      );
+    }
+    function escapeJS(str) {
+      if (!str) return '';
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+  </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
 
 
 @api_router.get("/cf/setup")
