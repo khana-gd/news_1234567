@@ -2184,7 +2184,7 @@ async def video_share_page(video_id: str):
     share_url_e   = _E(share_url)
     wa_url_e      = _E(wa_url)
     download_url_e = _E(download_url)
-    logo_url      = f"{BACKEND_URL}/api/logo.png"
+    logo_url      = "/api/logo.png"
     logo_url_e    = _E(logo_url)
 
     thumb_meta  = f'<meta property="og:image" content="{thumb_url_e}">' if thumb_url else ''
