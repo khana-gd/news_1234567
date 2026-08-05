@@ -2025,105 +2025,120 @@ async def video_share_page(video_id: str):
     Standalone web video player page — works without the app installed.
     Share URL: https://public-samachar-api.onrender.com/api/cf/share/{video_id}
     """
-    # Fetch video metadata from D1, MongoDB, WP, or YT
-    v = None
-    clean_id = video_id.replace("yt_", "").strip()
-    try:
-        results = await d1_query_async('SELECT * FROM news_feed WHERE id = ?', [clean_id])
-        if not results and video_id != clean_id:
-            results = await d1_query_async('SELECT * FROM news_feed WHERE id = ?', [video_id])
-        if results and len(results) > 0:
-            v = results[0]
-            if v.get('video_url') and not v['video_url'].startswith('http'):
-                v['video_url'] = f'{R2_PUBLIC_CDN}/{v["video_url"].lstrip("/")}'
-            if v.get('thumb_url') and not v['thumb_url'].startswith('http'):
-                thumb_path = v['thumb_url'].lstrip('/')
-                v['thumb_url'] = f'{R2_PUBLIC_CDN}/{thumb_path}'
-    except Exception as e:
-        logger.error(f"D1 query error: {e}")
-
-    # Fallback to MongoDB if not in D1
+    cache_key = f"share_v_{video_id}"
+    v = _cache_get(cache_key, 3600.0) # 1 hour cache
+    
     if not v:
-        try:
-            collections = await db.list_collection_names()
-            id_queries = [{"id": video_id}, {"_id": video_id}, {"video_id": video_id}, {"cf_id": video_id}, {"id": clean_id}, {"_id": clean_id}]
-            if video_id.isdigit():
-                id_queries.extend([{"id": int(video_id)}, {"_id": int(video_id)}])
-            elif clean_id.isdigit():
-                id_queries.extend([{"id": int(clean_id)}, {"_id": int(clean_id)}])
-            search_query = {"$or": id_queries}
-            priority_cols = ["cf_videos", "videos", "posts", "news_feed", "news", "articles"]
-            for col_name in priority_cols:
-                if col_name in collections:
-                    v = await db[col_name].find_one(search_query)
-                    if v:
-                        break
-            if not v:
-                for col_name in collections:
-                    if col_name not in priority_cols and not col_name.startswith("system."):
+        clean_id = video_id.replace("yt_", "").strip()
+        is_yt = video_id.startswith("yt_") or len(clean_id) == 11
+        
+        # 1. YouTube oEmbed (Fast Path)
+        if is_yt:
+            try:
+                http = get_async_client()
+                r = await http.get(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={clean_id}&format=json", timeout=4.0)
+                if r.status_code == 200:
+                    yt_data = r.json()
+                    t = html_lib.unescape(yt_data.get("title", ""))
+                    v = {
+                        "title": t,
+                        "description": f"Watch '{t}' on My Public Samachar.",
+                        "reporter_name": yt_data.get("author_name", "Public Samachar"),
+                        "thumb_url": f"https://img.youtube.com/vi/{clean_id}/hqdefault.jpg",
+                        "video_url": f"https://www.youtube.com/embed/{clean_id}",
+                        "location": "Karnataka"
+                    }
+            except Exception as e:
+                logger.error(f"YT oembed error: {e}")
+        
+        # 2. D1 Query
+        if not v:
+            try:
+                results = await d1_query_async('SELECT * FROM news_feed WHERE id = ?', [clean_id])
+                if not results and video_id != clean_id:
+                    results = await d1_query_async('SELECT * FROM news_feed WHERE id = ?', [video_id])
+                if results and len(results) > 0:
+                    v = results[0]
+                    if v.get('video_url') and not v['video_url'].startswith('http'):
+                        v['video_url'] = f'{R2_PUBLIC_CDN}/{v["video_url"].lstrip("/")}'
+                    if v.get('thumb_url') and not v['thumb_url'].startswith('http'):
+                        thumb_path = v['thumb_url'].lstrip('/')
+                        v['thumb_url'] = f'{R2_PUBLIC_CDN}/{thumb_path}'
+            except Exception as e:
+                logger.error(f"D1 query error: {e}")
+                
+        # 3. MongoDB Fallback
+        if not v:
+            try:
+                collections = await db.list_collection_names()
+                id_queries = [{"id": video_id}, {"_id": video_id}, {"video_id": video_id}, {"cf_id": video_id}, {"id": clean_id}, {"_id": clean_id}]
+                if video_id.isdigit():
+                    id_queries.extend([{"id": int(video_id)}, {"_id": int(video_id)}])
+                elif clean_id.isdigit():
+                    id_queries.extend([{"id": int(clean_id)}, {"_id": int(clean_id)}])
+                search_query = {"$or": id_queries}
+                priority_cols = ["cf_videos", "videos", "posts", "news_feed", "news", "articles"]
+                for col_name in priority_cols:
+                    if col_name in collections:
                         v = await db[col_name].find_one(search_query)
                         if v:
                             break
-        except Exception as e:
-            logger.error(f"MongoDB query error: {e}")
+                if not v:
+                    for col_name in collections:
+                        if col_name not in priority_cols and not col_name.startswith("system."):
+                            v = await db[col_name].find_one(search_query)
+                            if v:
+                                break
+            except Exception as e:
+                logger.error(f"MongoDB query error: {e}")
+                
+        # 4. WordPress REST API Fallback
+        if not v and (video_id.isdigit() or clean_id.isdigit()):
+            wp_id = video_id if video_id.isdigit() else clean_id
+            try:
+                http = get_async_client()
+                r = await http.get(f"{WP_BASE_URL}/wp-json/wp/v2/posts/{wp_id}?_embed=1", timeout=4.0)
+                if r.status_code == 200:
+                    wp_data = r.json()
+                    t = html_lib.unescape(wp_data.get("title", {}).get("rendered", ""))
+                    c = wp_data.get("content", {}).get("rendered", "") or wp_data.get("excerpt", {}).get("rendered", "")
+                    img = wp_data.get("jetpack_featured_media_url", "")
+                    if not img and "_embedded" in wp_data:
+                        media = wp_data["_embedded"].get("wp:featuredmedia", [])
+                        if media and isinstance(media, list) and len(media) > 0:
+                            img = media[0].get("source_url", "")
+                    auth = ""
+                    if "_embedded" in wp_data:
+                        authors = wp_data["_embedded"].get("author", [])
+                        if authors and isinstance(authors, list) and len(authors) > 0:
+                            auth = authors[0].get("name", "")
+                    src = ""
+                    mp4_m = re.search(r'src=["' + "'" + r'](https?://[^"' + "'" + r']+\.mp4)["' + "'" + r']', c, re.IGNORECASE)
+                    if mp4_m:
+                        src = mp4_m.group(1)
+                    else:
+                        if_m = re.search(r'src=["' + "'" + r'](https?://[^"' + "'" + r']+)["' + "'" + r']', c, re.IGNORECASE)
+                        if if_m:
+                            src = if_m.group(1)
+                    v = {
+                        "title": t,
+                        "description": c,
+                        "thumb_url": img,
+                        "reporter_name": auth,
+                        "video_url": src,
+                        "location": "Karnataka"
+                    }
+            except Exception as e:
+                logger.error(f"WP fetch error: {e}")
 
-    # Fallback to WordPress REST API if numeric ID
-    if not v and (video_id.isdigit() or clean_id.isdigit()):
-        wp_id = video_id if video_id.isdigit() else clean_id
-        try:
-            http = get_async_client()
-            r = await http.get(f"{WP_BASE_URL}/wp-json/wp/v2/posts/{wp_id}?_embed=1", timeout=4.0)
-            if r.status_code == 200:
-                wp_data = r.json()
-                t = html_lib.unescape(wp_data.get("title", {}).get("rendered", ""))
-                c = wp_data.get("content", {}).get("rendered", "") or wp_data.get("excerpt", {}).get("rendered", "")
-                img = wp_data.get("jetpack_featured_media_url", "")
-                if not img and "_embedded" in wp_data:
-                    media = wp_data["_embedded"].get("wp:featuredmedia", [])
-                    if media and isinstance(media, list) and len(media) > 0:
-                        img = media[0].get("source_url", "")
-                auth = ""
-                if "_embedded" in wp_data:
-                    authors = wp_data["_embedded"].get("author", [])
-                    if authors and isinstance(authors, list) and len(authors) > 0:
-                        auth = authors[0].get("name", "")
-                src = ""
-                mp4_m = re.search(r'src=["' + "'" + r'](https?://[^"' + "'" + r']+\.mp4)["' + "'" + r']', c, re.IGNORECASE)
-                if mp4_m:
-                    src = mp4_m.group(1)
-                else:
-                    if_m = re.search(r'src=["' + "'" + r'](https?://[^"' + "'" + r']+)["' + "'" + r']', c, re.IGNORECASE)
-                    if if_m:
-                        src = if_m.group(1)
-                v = {
-                    "title": t,
-                    "description": c,
-                    "thumb_url": img,
-                    "reporter_name": auth,
-                    "video_url": src,
-                    "location": "Karnataka"
-                }
-        except Exception as e:
-            logger.error(f"WP fetch error: {e}")
-
-    # Fallback to YouTube oEmbed
-    if not v and (video_id.startswith("yt_") or len(clean_id) == 11):
-        try:
-            http = get_async_client()
-            r = await http.get(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={clean_id}&format=json", timeout=4.0)
-            if r.status_code == 200:
-                yt_data = r.json()
-                t = html_lib.unescape(yt_data.get("title", ""))
-                v = {
-                    "title": t,
-                    "description": f"Watch '{t}' on My Public Samachar.",
-                    "reporter_name": yt_data.get("author_name", "Public Samachar"),
-                    "thumb_url": f"https://img.youtube.com/vi/{clean_id}/hqdefault.jpg",
-                    "video_url": f"https://www.youtube.com/embed/{clean_id}",
-                    "location": "Karnataka"
-                }
-        except Exception as e:
-            logger.error(f"YT oembed error: {e}")
+        # Cache negative result for 1 minute, positive result for 1 hour
+        if v:
+            _cache_set(cache_key, v)
+        else:
+            _cache_set(cache_key, {"not_found": True})
+            
+    if isinstance(v, dict) and v.get("not_found"):
+        v = None
 
     if not v:
         v = {
