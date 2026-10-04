@@ -21,14 +21,13 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { BRAND } from '../constants/theme';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { optimizeVideoForUpload, QualityMode } from '../utils/videoOptimizer';
+import { uploadVideoResiliently } from '../utils/resilientUpload';
+import { enqueueUpload } from '../utils/uploadQueue';
 
 // ── Video Thumbnails (non-critical) ──────────────────────────────────────────
 let VideoThumbnails: any = null;
 try { VideoThumbnails = require('expo-video-thumbnails'); } catch {}
-
-// ── Video Compressor (non-critical — falls back to original on failure) ───────
-let VideoCompressor: any = null;
-try { VideoCompressor = require('react-native-compressor').Video; } catch {}
 
 const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -61,7 +60,7 @@ async function fetchWithRetry(
   throw new Error('Server unavailable after multiple attempts. Please try again in a moment.');
 }
 
-type CfStatus = 'idle' | 'uploading' | 'done' | 'error';
+type CfStatus = 'idle' | 'uploading' | 'done' | 'error' | 'queued_saved';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const PREVIEW_H = Math.round(SCREEN_H * 0.38);
@@ -74,16 +73,19 @@ export default function VideoEditorScreen() {
     title:       paramTitle,
     location:    paramLocation,
     description: paramDescription,
+    aspectRatio: paramAspectRatio,
   } = useLocalSearchParams<{
-    uri: string; title?: string; location?: string; description?: string;
+    uri: string; title?: string; location?: string; description?: string; aspectRatio?: string;
   }>();
 
   // ── Cloudflare R2 upload state ────────────────────────────────────────────
-  const [cfStatus, setCfStatus]     = useState<CfStatus>('idle');
-  const [cfProgress, setCfProgress] = useState(0);
-  const [cfMsg, setCfMsg]           = useState('');
-  const [cfError, setCfError]       = useState<string | null>(null);
+  const [cfStatus, setCfStatus]         = useState<CfStatus>('idle');
+  const [cfProgress, setCfProgress]     = useState(0);
+  const [cfMsg, setCfMsg]               = useState('');
+  const [cfError, setCfError]           = useState<string | null>(null);
   const [uploadedVideoId, setUploadedVideoId] = useState<string | null>(null);
+  const [qualityMode, setQualityMode]   = useState<QualityMode>('rural');
+  const [optStats, setOptStats]         = useState<{ origMB: string; compMB: string; savedPct: number } | null>(null);
 
   const player = useVideoPlayer(
     (Platform.OS === 'web' ? '' : (uri ?? '')),
@@ -149,136 +151,69 @@ export default function VideoEditorScreen() {
 
     setCfStatus('uploading');
     setCfProgress(5);
-    setCfMsg('Preparing secure upload...');
+    setCfMsg('Preparing resilient upload...');
     setCfError(null);
+    setOptStats(null);
+
+    let finalUploadUri = uri;
 
     try {
-      // ── Step 1.5: Compress video (non-critical — falls back to original) ────
-      setCfProgress(10);
-      setCfMsg('Compressing video...');
-      let uploadUri = uri;
+      // ── Step 1: Optimize Video for Rural / Weak Network ───────────────────
+      setCfProgress(8);
+      setCfMsg(qualityMode === 'rural'
+        ? '⚡ Rural Network Saver: Optimizing video...'
+        : 'Compressing video...'
+      );
 
-      if (Platform.OS !== 'web' && VideoCompressor) {
-        try {
-          const originalSize = (await (FileSystem as any).getInfoAsync(uploadUri))?.size ?? 0;
-          const originalMB = (originalSize / 1024 / 1024).toFixed(1);
-          setCfMsg(`Compressing ${originalMB} MB video...`);
-
-          const compressedUri = await VideoCompressor.compress(
-            uploadUri,
-            {
-              compressionMethod: 'auto',
-              maxSize: 1280,
-              bitrate: 2_000_000,
-            },
-            (progress: number) => {
-              const pct = Math.round(progress * 100);
-              setCfMsg(`Compressing video... ${pct}%`);
-              setCfProgress(10 + Math.round(progress * 5)); // 10→15%
-            },
-          );
-
-          const compressedSize = (await (FileSystem as any).getInfoAsync(compressedUri))?.size ?? 0;
-          const compressedMB = (compressedSize / 1024 / 1024).toFixed(1);
-          setCfMsg(`Compressed: ${originalMB} MB → ${compressedMB} MB ✓`);
-          uploadUri = compressedUri;
-          await new Promise(r => setTimeout(r, 600)); // brief pause to show message
-        } catch (compressErr) {
-          // Non-critical — continue with original
-          setCfMsg('Compression skipped — uploading original...');
-          uploadUri = uri;
+      const optResult = await optimizeVideoForUpload(
+        uri,
+        qualityMode,
+        (progressPct, statusTxt) => {
+          setCfProgress(Math.min(22, 8 + Math.round(progressPct * 0.14)));
+          setCfMsg(statusTxt);
         }
-      }
+      );
 
-      // Copy content:// URIs to cache first (Android gallery picker)
-      if (uploadUri.startsWith('content://')) {
-        setCfMsg('Preparing video file...');
-        const dest = `${FileSystem.cacheDirectory}cf_upload_${Date.now()}.mp4`;
-        await FileSystem.copyAsync({ from: uploadUri, to: dest });
-        uploadUri = dest;
+      finalUploadUri = optResult.uri;
+
+      if (optResult.didCompress && optResult.originalSize > 0) {
+        const origMB = (optResult.originalSize / (1024 * 1024)).toFixed(1);
+        const compMB = (optResult.compressedSize / (1024 * 1024)).toFixed(1);
+        const savedPct = Math.round(optResult.compressionRatio * 100);
+        setOptStats({ origMB, compMB, savedPct });
       }
 
       // Get reporter name
       const savedReporterName = await AsyncStorage.getItem('reporter_name').catch(() => null);
       const reporterName = savedReporterName || 'Public Samachar Reporter';
 
-      // ── Step 1: Get presigned PUT URL ─────────────────────────────────────
-      setCfMsg('Connecting to server...');
-      setCfProgress(8);
+      // ── Step 2: Native Stream Off-Heap Resilient Upload ───────────────────
+      setCfProgress(24);
+      setCfMsg('Connecting to Cloudflare storage...');
 
-      const urlRes = await fetchWithRetry(
-        `${BACKEND}/api/generate-upload-url?content_type=video%2Fmp4`,
-        { headers: authHeaders },
-        4,
-        (attempt, total) => setCfMsg(`Connecting... (attempt ${attempt}/${total})`),
+      const { videoId, videoKey } = await uploadVideoResiliently(
+        finalUploadUri,
+        authHeaders,
+        (u) => {
+          // Map 0-100% of resilient upload to 24% - 86% of overall flow
+          const mappedPct = Math.min(86, 24 + Math.round((u.percent / 100) * 62));
+          setCfProgress(mappedPct);
+          setCfMsg(u.statusText);
+        },
+        5 // Up to 5 auto-retries with exponential backoff on network drop
       );
 
-      if (urlRes.status === 401) {
-        await AsyncStorage.multiRemove(['reporter_jwt_token', 'reporter_unlocked_v1']);
-        setCfStatus('idle');
-        router.replace({ pathname: '/reporter-login', params: { expired: 'true' } } as any);
-        return;
-      }
-      if (!urlRes.ok) {
-        throw new Error(`Server error (${urlRes.status}). Please try again.`);
-      }
-      const { upload_url: presignedUrl, video_id: videoId, key: videoKey } = await urlRes.json();
-      if (!presignedUrl || !videoId) {
-        throw new Error('Server returned invalid upload token. Please try again.');
-      }
-
-      // ── Step 2: Read file as Blob ─────────────────────────────────────────
-      setCfProgress(12);
-      setCfMsg('Reading video file...');
-      let fileBlob: Blob;
-      try {
-        const fileRes = await fetch(uploadUri);
-        fileBlob = await fileRes.blob();
-      } catch {
-        throw new Error('Could not read video file. Please try picking it again.');
-      }
-
-      // ── Step 2b: XHR PUT with real progress (15 → 84%) ──────────────────
-      setCfProgress(15);
-      setCfMsg('Starting upload...');
-
-      const xhrResult = await new Promise<{ ok: boolean; err?: string }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('PUT', presignedUrl, true);
-        xhr.setRequestHeader('Content-Type', 'video/mp4');
-        xhr.timeout = 600_000; // 10 minutes
-
-        xhr.upload.onprogress = (e: ProgressEvent) => {
-          if (e.lengthComputable && e.total > 0) {
-            const pct = Math.min(84, 15 + Math.round((e.loaded / e.total) * 69));
-            setCfProgress(pct);
-            const uploadedMB = (e.loaded / 1024 / 1024).toFixed(1);
-            const totalMB    = (e.total   / 1024 / 1024).toFixed(1);
-            setCfMsg(`Uploading ${uploadedMB} / ${totalMB} MB`);
-          }
-        };
-        xhr.onload    = () => xhr.status >= 200 && xhr.status < 300
-          ? resolve({ ok: true })
-          : resolve({ ok: false, err: `Upload failed (HTTP ${xhr.status}). Check your connection.` });
-        xhr.onerror   = () => reject(new Error('Network error. Check your internet connection and try again.'));
-        xhr.ontimeout = () => reject(new Error('Upload timed out. Use Wi-Fi for large videos.'));
-        xhr.send(fileBlob);
-      });
-
-      if (!xhrResult.ok) throw new Error(xhrResult.err || 'Upload to cloud storage failed.');
-
       // ── Step 3: Thumbnail (non-critical) ─────────────────────────────────
-      setCfProgress(86);
+      setCfProgress(88);
       setCfMsg('Generating thumbnail...');
       let thumbKey = '';
       try {
         if (Platform.OS !== 'web' && VideoThumbnails) {
-          const { uri: rawThumbUri } = await VideoThumbnails.getThumbnailAsync(uploadUri, {
+          const { uri: rawThumbUri } = await VideoThumbnails.getThumbnailAsync(finalUploadUri, {
             time: 1000,
             quality: 0.8,
           });
 
-          // Compress thumbnail to max 720px width (FIX 4)
           let thumbUri = rawThumbUri;
           try {
             const ImageManipulator = require('expo-image-manipulator');
@@ -288,7 +223,7 @@ export default function VideoEditorScreen() {
               { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
             );
             thumbUri = manipResult.uri;
-          } catch { /* compression non-critical — use raw thumb */ }
+          } catch { /* compression non-critical */ }
 
           const thumbUrlRes = await fetchWithRetry(
             `${BACKEND}/api/generate-thumb-url`,
@@ -303,7 +238,7 @@ export default function VideoEditorScreen() {
                 const txhr = new XMLHttpRequest();
                 txhr.open('PUT', thumbPresigned, true);
                 txhr.setRequestHeader('Content-Type', 'image/jpeg');
-                txhr.timeout = 30_000;
+                txhr.timeout = 25000;
                 txhr.onload  = () => res(txhr.status >= 200 && txhr.status < 300);
                 txhr.onerror = () => res(false);
                 txhr.send(thumbBlob);
@@ -318,9 +253,9 @@ export default function VideoEditorScreen() {
         }
       } catch { /* thumbnail is non-critical */ }
 
-      // ── Step 4: Save metadata ─────────────────────────────────────────────
-      setCfProgress(90);
-      setCfMsg('Saving to feed...');
+      // ── Step 4: Save metadata to D1 ───────────────────────────────────────
+      setCfProgress(92);
+      setCfMsg('Publishing to Public Samachar feed...');
 
       const metaRes = await fetchWithRetry(`${BACKEND}/api/cf/save-video-meta`, {
         method: 'POST',
@@ -334,6 +269,7 @@ export default function VideoEditorScreen() {
           reporter_name: reporterName,
           reporter_id:   `reporter_${Date.now()}`,
           thumb_key:     thumbKey,
+          aspect_ratio:  paramAspectRatio || '16:9',
         }),
       }, 3);
 
@@ -350,9 +286,9 @@ export default function VideoEditorScreen() {
 
       setUploadedVideoId(videoId);
 
-      // Clean up temp file if we copied from content://
+      // Clean up temp optimized file if different from original
       try {
-        if (uploadUri !== uri) await (FileSystem as any).deleteAsync(uploadUri, { idempotent: true });
+        if (finalUploadUri !== uri) await (FileSystem as any).deleteAsync(finalUploadUri, { idempotent: true });
       } catch {}
 
       setCfProgress(100);
@@ -360,17 +296,52 @@ export default function VideoEditorScreen() {
       setCfStatus('done');
 
     } catch (e: any) {
+      if (e?.message === 'AUTH_EXPIRED') {
+        await AsyncStorage.multiRemove(['reporter_jwt_token', 'reporter_unlocked_v1']);
+        setCfStatus('idle');
+        router.replace({ pathname: '/reporter-login', params: { expired: 'true' } } as any);
+        return;
+      }
+
       const raw = e?.message || 'Upload failed. Check your connection and try again.';
       let friendlyMsg = raw;
-      if (raw.toLowerCase().includes('network request failed') || raw.toLowerCase().includes('network error')) {
-        friendlyMsg = 'No internet connection. Connect to Wi-Fi or mobile data and try again.';
-      } else if (raw.toLowerCase().includes('timed out')) {
-        friendlyMsg = 'Upload timed out. Please use Wi-Fi for large videos.';
+      if (
+        raw.toLowerCase().includes('network') ||
+        raw.toLowerCase().includes('connection') ||
+        raw.toLowerCase().includes('timed out') ||
+        raw.toLowerCase().includes('storage error')
+      ) {
+        friendlyMsg = '📶 Weak network detected (Dharwad/Hubli area). Video couldn\'t complete. You can Retry or Save Offline to auto-upload once internet is detected.';
       }
       setCfError(friendlyMsg);
       setCfStatus('error');
     }
-  }, [uri, paramTitle, paramDescription, paramLocation, router]);
+  }, [uri, paramTitle, paramDescription, paramLocation, paramAspectRatio, qualityMode, router]);
+
+  // ── Save to Offline Queue for Auto-Sync ────────────────────────────────────
+  const handleSaveOffline = useCallback(async () => {
+    if (!uri || !paramTitle?.trim()) return;
+    try {
+      setCfMsg('Saving video to offline queue...');
+      const savedReporterName = await AsyncStorage.getItem('reporter_name').catch(() => null);
+      const reporterName = savedReporterName || 'Public Samachar Reporter';
+
+      await enqueueUpload({
+        videoUri: uri,
+        title: paramTitle.trim(),
+        description: paramDescription?.trim() || '',
+        location: paramLocation?.trim() || '',
+        reporterName,
+        reporterId: `reporter_${Date.now()}`,
+        aspectRatio: paramAspectRatio || '16:9',
+        qualityMode,
+      });
+
+      setCfStatus('queued_saved');
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Could not save to offline queue');
+    }
+  }, [uri, paramTitle, paramDescription, paramLocation, paramAspectRatio, qualityMode]);
 
   // ── UI ────────────────────────────────────────────────────────────────────
   return (
@@ -442,10 +413,60 @@ export default function VideoEditorScreen() {
             </View>
           ) : null}
 
+          {/* ── Network Optimization Selector ── */}
+          {cfStatus === 'idle' && (
+            <View style={styles.modeCard}>
+              <View style={styles.modeHdrRow}>
+                <MaterialIcons name="network-check" size={18} color="#1AAA94" />
+                <Text style={styles.modeCardTitle}>ನೆಟ್‌ವರ್ಕ್ ಆಪ್ಟಿಮೈಜರ್ / Network Optimizer</Text>
+              </View>
+
+              <View style={styles.modeRow}>
+                <TouchableOpacity
+                  style={[styles.modeChip, qualityMode === 'rural' && styles.modeChipActive]}
+                  onPress={() => setQualityMode('rural')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="bolt" size={16} color={qualityMode === 'rural' ? '#fff' : '#1AAA94'} />
+                  <Text style={[styles.modeChipTxt, qualityMode === 'rural' && styles.modeChipTxtActive]}>
+                    ⚡ Rural Fast (ಗ್ರಾಮೀಣ ವೇಗ)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modeChip, qualityMode === 'hd' && styles.modeChipActive]}
+                  onPress={() => setQualityMode('hd')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="hd" size={16} color={qualityMode === 'hd' ? '#fff' : '#1AAA94'} />
+                  <Text style={[styles.modeChipTxt, qualityMode === 'hd' && styles.modeChipTxtActive]}>
+                    Standard HD
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modeDesc}>
+                {qualityMode === 'rural'
+                  ? '⚡ ಧಾರವಾಡ, ಹುಬ್ಬಳ್ಳಿ ಹಾಗೂ ಗ್ರಾಮೀಣ ಭಾಗಗಳಿಗೆ ಶಿಫಾರಸು: ವಿಡಿಯೋ ಗಾತ್ರವನ್ನು 90% ಕಡಿಮೆ ಮಾಡುತ್ತದೆ (~5-7 MB), 2G/3G ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲೂ ವೇಗವಾಗಿ ಅಪ್ಲೋಡ್ ಆಗುತ್ತದೆ.'
+                  : '🎬 Standard HD: ಪೂರ್ಣ ರೆಸಲ್ಯೂಶನ್ ಅಪ್ಲೋಡ್. ಉತ್ತಮ ವೈ-ಫೈ (Wi-Fi) ಅಥವಾ 5G ಇದ್ದಾಗ ಮಾತ್ರ ಬಳಸಿ.'}
+              </Text>
+            </View>
+          )}
+
           {/* ── Upload Progress ── */}
           {cfStatus === 'uploading' && (
             <View style={styles.card}>
               <Text style={styles.cardTitle}>☁️ Uploading to Video Feed...</Text>
+
+              {optStats && (
+                <View style={styles.optBadge}>
+                  <MaterialIcons name="check-circle" size={14} color="#4CAF50" />
+                  <Text style={styles.optBadgeTxt}>
+                    ⚡ Optimized: {optStats.origMB} MB → {optStats.compMB} MB ({optStats.savedPct}% smaller!)
+                  </Text>
+                </View>
+              )}
+
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: `${cfProgress}%` as any }]} />
               </View>
@@ -453,20 +474,61 @@ export default function VideoEditorScreen() {
                 <Text style={styles.progressPct}>{cfProgress}%</Text>
                 <Text style={styles.progressMsg}>{cfMsg}</Text>
               </View>
+              <Text style={styles.keepAwakeTip}>
+                💡 ಸುಳಿವು: ಅಪ್ಲೋಡ್ ಆಗುವವರೆಗೆ ಆ್ಯಪ್ ತೆರೆದಿಡಿ (Keep app open)
+              </Text>
               <ActivityIndicator size="small" color="#1AAA94" style={{ marginTop: 8 }} />
             </View>
           )}
 
-          {/* ── Upload Error ── */}
+          {/* ── Upload Error with Offline Queue Option ── */}
           {cfStatus === 'error' && cfError && (
             <View style={[styles.card, styles.cardError]}>
-              <Text style={[styles.cardTitle, { color: '#F44336' }]}>☁️ Upload Failed</Text>
+              <Text style={[styles.cardTitle, { color: '#F44336' }]}>☁️ Upload Interrupted</Text>
               <Text style={styles.errTxt}>{cfError}</Text>
+
+              <View style={styles.errBtnRow}>
+                <TouchableOpacity
+                  style={styles.retryBtn}
+                  onPress={handleUploadToCloudflare}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="refresh" size={16} color="#fff" />
+                  <Text style={styles.retryTxt}>ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ / Try Again</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.saveOfflineBtn}
+                  onPress={handleSaveOffline}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="cloud-queue" size={16} color="#1AAA94" />
+                  <Text style={styles.saveOfflineTxt}>ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿ ಉಳಿಸಿ (Save Offline)</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.offlineHint}>
+                💡 ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿ ಉಳಿಸಿದರೆ, ನೀವು ನೆಟ್‌ವರ್ಕ್ ಸಿಗುವ ಜಾಗಕ್ಕೆ (ಧಾರವಾಡ/ಹುಬ್ಬಳ್ಳಿ ನಗರ) ಹೋದಾಗ ಅಥವಾ ವೈಫೈ ಸಿಕ್ಕಾಗ ವಿಡಿಯೋ ತಂತಾನೇ ಅಪ್ಲೋಡ್ ಆಗುತ್ತದೆ.
+              </Text>
+            </View>
+          )}
+
+          {/* ── SAVED IN OFFLINE QUEUE ── */}
+          {cfStatus === 'queued_saved' && (
+            <View style={styles.queuedCard}>
+              <MaterialIcons name="cloud-done" size={64} color="#1AAA94" />
+              <Text style={styles.queuedTitle}>ಆಫ್‌ಲೈನ್ ಕ್ಯೂನಲ್ಲಿ ಉಳಿಸಲಾಗಿದೆ! 💾</Text>
+              <Text style={styles.queuedSub}>
+                ನಿಮ್ಮ ಸುದ್ದಿ ವರದಿ ಮತ್ತು ವಿಡಿಯೋ ಫೋನ್‌ನಲ್ಲಿ ಸುರಕ್ಷಿತವಾಗಿದೆ.{'\n\n'}
+                ನೀವು ಧಾರವಾಡ, ಹುಬ್ಬಳ್ಳಿ ನಗರಕ್ಕೆ ಹೋದಾಗ ಅಥವಾ ಇಂಟರ್ನೆಟ್ ಸಂಪರ್ಕ ಸಿಕ್ಕಿದಾಗ ಇದು ಸ್ವಯಂಚಾಲಿತವಾಗಿ ಅಪ್ಲೋಡ್ ಆಗಿ ಪಬ್ಲಿಕ್ ಸಮಾಚಾರ ಫೀಡ್‌ನಲ್ಲಿ ಪ್ರಕಟವಾಗುತ್ತದೆ.
+              </Text>
+
               <TouchableOpacity
-                style={styles.retryBtn}
-                onPress={() => { setCfStatus('idle'); setCfError(null); }}
+                style={[styles.doneBtn, { backgroundColor: '#1AAA94', marginTop: 12 }]}
+                onPress={() => router.replace('/(tabs)/video' as any)}
+                activeOpacity={0.85}
               >
-                <Text style={styles.retryTxt}>Try Again</Text>
+                <Text style={styles.doneTxt}>ಫೀಡ್‌ಗೆ ಹಿಂತಿರುಗಿ (Done) →</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -560,7 +622,7 @@ export default function VideoEditorScreen() {
               <TouchableOpacity
                 style={[styles.copyBtn, { backgroundColor: 'rgba(255,255,255,0.07)', borderColor: 'rgba(255,255,255,0.2)' }]}
                 onPress={async () => {
-                  const appLink = 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev/downloads/index.html';
+                  const appLink = BACKEND ? `${BACKEND}/download` : 'https://public-samachar-api.onrender.com/download';
                   try {
                     await Share.share({
                       message: `📺 Watch news videos on Public Samachar!\n\nDownload the app:\n${appLink}`,
@@ -578,7 +640,7 @@ export default function VideoEditorScreen() {
               <TouchableOpacity
                 style={[styles.waBtn, { backgroundColor: '#075E54' }]}
                 onPress={() => {
-                  const appLink = 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev/downloads/index.html';
+                  const appLink = BACKEND ? `${BACKEND}/download` : 'https://public-samachar-api.onrender.com/download';
                   const msg = `📺 *Public Samachar* — Watch local news videos!\n\nDownload the app:\n${appLink}`;
                   Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`).catch(() =>
                     Linking.openURL(`https://wa.me/?text=${encodeURIComponent(msg)}`)
@@ -640,4 +702,27 @@ const styles = StyleSheet.create({
   copyBtnTxt:    { color: BRAND.primary, fontWeight: '700', fontSize: 14 },
   waBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#25D366', borderRadius: 24, paddingVertical: 12, paddingHorizontal: 28, width: '100%' },
   waBtnTxt:      { color: '#fff', fontWeight: '700', fontSize: 14 },
+  // Network Mode Optimizer Styles
+  modeCard:      { backgroundColor: 'rgba(26,170,148,0.08)', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: 'rgba(26,170,148,0.25)', gap: 8 },
+  modeHdrRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  modeCardTitle: { fontSize: 13, fontWeight: '800', color: '#1AAA94', textTransform: 'uppercase', letterSpacing: 0.5 },
+  modeRow:       { flexDirection: 'row', gap: 10, marginTop: 4 },
+  modeChip:      { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  modeChipActive:{ backgroundColor: '#1AAA94', borderColor: '#1AAA94' },
+  modeChipTxt:   { fontSize: 12, fontWeight: '700', color: '#fff' },
+  modeChipTxtActive: { color: '#fff', fontWeight: '800' },
+  modeDesc:      { fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 16, marginTop: 2 },
+  // Optimization & Progress Badges
+  optBadge:      { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(76,175,80,0.15)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, alignSelf: 'flex-start', marginBottom: 8 },
+  optBadgeTxt:   { fontSize: 11, fontWeight: '700', color: '#81C784' },
+  keepAwakeTip:  { fontSize: 11, color: 'rgba(255,255,255,0.45)', textAlign: 'center', marginTop: 4 },
+  // Error & Offline Queue Styles
+  errBtnRow:     { flexDirection: 'column', gap: 8, marginTop: 10 },
+  saveOfflineBtn:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(26,170,148,0.15)', borderRadius: 20, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: 'rgba(26,170,148,0.3)' },
+  saveOfflineTxt:{ color: '#1AAA94', fontWeight: '700', fontSize: 13 },
+  offlineHint:   { fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 16, marginTop: 8 },
+  // Queued Saved Card
+  queuedCard:    { backgroundColor: 'rgba(26,170,148,0.1)', borderRadius: 20, padding: 24, alignItems: 'center', gap: 12, borderWidth: 1, borderColor: 'rgba(26,170,148,0.35)' },
+  queuedTitle:   { fontSize: 19, fontWeight: '900', color: '#1AAA94', textAlign: 'center' },
+  queuedSub:     { fontSize: 13, color: 'rgba(255,255,255,0.78)', textAlign: 'center', lineHeight: 20 },
 });

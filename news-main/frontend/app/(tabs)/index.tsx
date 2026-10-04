@@ -17,7 +17,6 @@ import { useAuth } from '../../context/AuthContext';
 import SidebarMenu from '../../components/SidebarMenu';
 import SocialInteractionBar from '../../components/SocialInteractionBar';
 import CommentSheet from '../../components/CommentSheet';
-import VideoPlayerModal from '../../components/VideoPlayerModal';
 import { showToast } from '../../components/Toast';
 import { NewsCardSkeletonList } from '../../components/NewsCardSkeleton';
 import { BRAND } from '../../constants/theme';
@@ -198,7 +197,7 @@ export default function HomeScreen() {
   // ── Video player modal + comment sheet ─────────────────────────────────────
   const [ytPlayerVideo, setYtPlayerVideo] = useState<YouTubeVideo | null>(null);
   const [commentTarget, setCommentTarget] = useState<{
-    source: 'youtube' | 'wp';
+    source: 'youtube' | 'wp' | 'ps';
     id: string | number;
     title: string;
   } | null>(null);
@@ -366,11 +365,10 @@ export default function HomeScreen() {
   const loadInitial = useCallback(async () => {
     setLoading(true);
     try {
-      const [storiesData, catsData, featuredData, ytData, cfVideos] = await Promise.all([
+      const [storiesData, catsData, featuredData, cfVideos] = await Promise.all([
         api.getStories(),
         api.getCategories(),
         api.getPosts(1, 6),
-        api.getYoutubeFeed().catch(() => ({ videos: [] })),
         fetchCFVideos(1).catch(() => []),
       ]);
       const formattedCF: YouTubeVideo[] = (cfVideos || []).map(v => ({
@@ -380,11 +378,10 @@ export default function HomeScreen() {
         thumbnail: v.thumb_url || '',
         url: v.video_url || '',
       }));
-      const mergedVideos = [...formattedCF, ...(ytData.videos || [])];
       setStories(storiesData);
       setCategories(catsData);
       setFeaturedPosts(featuredData.posts);
-      setYtVideos(mergedVideos);
+      setYtVideos(formattedCF);
       detectLanguageCategory(catsData);
       AsyncStorage.setItem('home_cache_v1', JSON.stringify({ featured: featuredData.posts, ts: Date.now() })).catch(() => {});
     } catch (e) {
@@ -509,10 +506,6 @@ export default function HomeScreen() {
             />
           </View>
           <View style={styles.headerRight}>
-            <TouchableOpacity testID="header-youtube-btn" style={styles.headerIcon}
-              onPress={() => Linking.openURL('https://www.youtube.com/@MyPublicSamachar')}>
-              <MaterialIcons name="play-circle-filled" size={27} color="#FF0000" />
-            </TouchableOpacity>
             <TouchableOpacity testID="header-bell-btn" style={styles.headerIcon}
               onPress={() => showToast(language === 'kn' ? 'ಶೀಘ್ರದಲ್ಲಿ ಬರುತ್ತಿದೆ' : 'Notifications coming soon', 'info')}>
               <MaterialIcons name="notifications" size={27} color="#444" />
@@ -802,11 +795,7 @@ export default function HomeScreen() {
                     testID={`top5-video-item-${idx}`}
                     style={styles.top5Card}
                     onPress={() => {
-                      if (vid.url && !vid.url.includes('youtube.com')) {
-                        router.push({ pathname: '/(tabs)/video', params: { videoId: vid.video_id } });
-                      } else {
-                        setYtPlayerVideo(vid);
-                      }
+                      router.push({ pathname: '/(tabs)/video', params: { videoId: vid.video_id } });
                     }}
                     activeOpacity={0.88}
                   >
@@ -815,7 +804,7 @@ export default function HomeScreen() {
                         <Image source={{ uri: vid.thumbnail }} style={styles.top5Thumb} resizeMode="cover" />
                       ) : (
                         <View style={[styles.top5Thumb, styles.top5ThumbFallback]}>
-                          <Ionicons name="logo-youtube" size={32} color="#FF0000" />
+                          <Ionicons name="videocam" size={32} color="#1AAA94" />
                         </View>
                       )}
                       <View style={styles.top5PlayIconOverlay}>
@@ -948,11 +937,7 @@ export default function HomeScreen() {
                           key={`yt-${vid.video_id}`}
                           style={styles.ytCard}
                           onPress={() => {
-                            if (vid.url && !vid.url.includes('youtube.com')) {
-                              router.push({ pathname: '/(tabs)/video', params: { videoId: vid.video_id } });
-                            } else {
-                              setYtPlayerVideo(vid);
-                            }
+                            router.push({ pathname: '/(tabs)/video', params: { videoId: vid.video_id } });
                           }}
                           activeOpacity={0.88}
                         >
@@ -960,17 +945,17 @@ export default function HomeScreen() {
                             {vid.thumbnail
                               ? <Image source={{ uri: vid.thumbnail }} style={styles.ytThumb} resizeMode="cover" />
                               : <View style={[styles.ytThumb, { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }]}>
-                                  <Ionicons name="logo-youtube" size={40} color="#FF0000" />
+                                  <Ionicons name="videocam" size={40} color="#1AAA94" />
                                 </View>}
                             <View style={styles.ytPlayOverlay}>
-                              <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+                              <Ionicons name="play" size={18} color="#fff" />
                             </View>
                           </View>
                           <View style={styles.ytCardBody}>
                             <View style={styles.ytBadgeRow}>
-                              <View style={styles.ytBadge}>
-                                <Ionicons name="logo-youtube" size={10} color="#fff" />
-                                <Text style={styles.ytBadgeTxt}>YouTube</Text>
+                              <View style={[styles.ytBadge, { backgroundColor: '#1AAA94' }]}>
+                                <Ionicons name="videocam" size={10} color="#fff" />
+                                <Text style={styles.ytBadgeTxt}>{language === 'kn' ? 'ವಿಡಿಯೋ' : 'VIDEO'}</Text>
                               </View>
                               <Text style={styles.ytDate}>{formatDate(vid.published)}</Text>
                             </View>
@@ -981,7 +966,7 @@ export default function HomeScreen() {
                               url={vid.url}
                               compact
                               showDivider
-                              onComment={() => setCommentTarget({ source: 'youtube', id: vid.video_id, title: vid.title })}
+                              onComment={() => setCommentTarget({ source: 'ps', id: vid.video_id, title: vid.title })}
                             />
                           </View>
                         </TouchableOpacity>
@@ -1179,15 +1164,7 @@ export default function HomeScreen() {
           }}
         />
 
-        {/* In-app YouTube Video Player Modal */}
-        {ytPlayerVideo && (
-          <VideoPlayerModal
-            visible={!!ytPlayerVideo}
-            videoId={ytPlayerVideo.video_id}
-            title={ytPlayerVideo.title}
-            onClose={() => setYtPlayerVideo(null)}
-          />
-        )}
+
 
         {/* Native Comment Sheet */}
         {commentTarget && (

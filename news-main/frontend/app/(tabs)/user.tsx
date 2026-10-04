@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import UploadVideoModal from '../../components/UploadVideoModal';
+import PendingUploadsSheet from '../../components/PendingUploadsSheet';
 import { useRouter, useFocusEffect } from 'expo-router';
 
 const WP_LOGIN_URL = process.env.EXPO_PUBLIC_WP_LOGIN_URL || 'https://mypublicsamachar.com/user-2/';
@@ -199,6 +200,7 @@ export default function UserScreen() {
         <MaterialIcons name="person" size={26} color="#1AAA94" />
         <Text style={styles.headerTitle}>{t('profile')}</Text>
       </View>
+      <PendingUploadsSheet language={language} />
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Brand */}
@@ -267,7 +269,7 @@ export default function UserScreen() {
               </View>
 
               {/* Upload Video */}
-              <TouchableOpacity testID="upload-video-btn" style={styles.uploadVideoBtn} onPress={() => setShowUploadVideo(true)}>
+              <TouchableOpacity testID="upload-video-btn" style={styles.uploadVideoBtn} onPress={() => setShowReporterUpload(true)}>
                 <MaterialIcons name="video-call" size={22} color="#fff" />
                 <Text style={styles.uploadVideoBtnText}>
                   {language === 'kn' ? 'ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಮಾಡಿ' : 'Upload Video'}

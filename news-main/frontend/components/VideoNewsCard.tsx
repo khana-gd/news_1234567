@@ -40,6 +40,7 @@ export type VideoItem = {
   reach?: number;
   cautionFlag?: boolean;
   verified?: boolean;
+  aspectRatio?: '16:9' | '9:16';
 };
 
 function timeAgo(ts: number): string {
@@ -57,7 +58,7 @@ function timeAgo(ts: number): string {
 // ── Lazy video player: only created when user taps play ────────────────────
 // This avoids creating N player instances for N cards in the FlatList.
 // The player is instantiated ONLY when this component is mounted.
-function ActiveVideoPlayer({ url, onStop }: { url: string; onStop: () => void }) {
+function ActiveVideoPlayer({ url, onStop, isPortrait }: { url: string; onStop: () => void; isPortrait?: boolean }) {
   const [buffering, setBuffering] = useState(true);
 
   const player = useVideoPlayer(url, (p) => {
@@ -81,11 +82,13 @@ function ActiveVideoPlayer({ url, onStop }: { url: string; onStop: () => void })
     };
   }, [player]);
 
+  const height = isPortrait ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16);
+
   return (
-    <View style={{ width: W, height: VIDEO_H, backgroundColor: '#000' }}>
+    <View style={{ width: W, height: height, backgroundColor: '#000' }}>
       <VideoView
         player={player}
-        style={{ width: W, height: VIDEO_H }}
+        style={{ width: W, height: height }}
         contentFit="contain"
         nativeControls
         allowsFullscreen
@@ -136,7 +139,7 @@ export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
     : `${BACKEND_URL}/api/cf/share/${videoId}`;
 
   const shareMsg =
-    `📺 ${item.title}\nWatch here: ${shareUrl}\n📱 Download app: https://mypublicsamachar.com/download`;
+    `📺 ${item.title}\nWatch here: ${shareUrl}\n📱 Download app: ${BACKEND_URL}/download`;
 
   const handleWhatsApp = useCallback(() => {
     Linking.openURL(`whatsapp://send?text=${encodeURIComponent(shareMsg)}`).catch(() =>
@@ -236,21 +239,22 @@ export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
           <ActiveVideoPlayer
             url={item.videoUrl}
             onStop={() => setIsPlaying(false)}
+            isPortrait={item.aspectRatio === '9:16'}
           />
         ) : (
           <TouchableOpacity
             onPress={() => isCF && setIsPlaying(true)}
             activeOpacity={0.92}
-            style={{ width: W, height: VIDEO_H }}
+            style={{ width: W, height: item.aspectRatio === '9:16' ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16) }}
           >
             {item.thumbUrl ? (
               <Image
                 source={{ uri: item.thumbUrl }}
-                style={{ width: W, height: VIDEO_H }}
+                style={{ width: W, height: item.aspectRatio === '9:16' ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16) }}
                 resizeMode="cover"
               />
             ) : (
-              <View style={[styles.thumbPlaceholder, { height: VIDEO_H }]}>
+              <View style={[styles.thumbPlaceholder, { height: item.aspectRatio === '9:16' ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16) }]}>
                 <View style={styles.thumbGradientTop} />
                 <MaterialIcons name="play-circle-filled" size={64} color="rgba(255,255,255,0.85)" />
                 <Text style={styles.thumbPreviewTitle} numberOfLines={2}>{item.title}</Text>
@@ -358,7 +362,7 @@ export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
       {/* ── Get App link ─────────────────────────────────────────── */}
       <TouchableOpacity
         style={styles.getAppRow}
-        onPress={() => Linking.openURL('https://mypublicsamachar.com/download').catch(() => {})}
+        onPress={() => Linking.openURL(`${BACKEND_URL}/download`).catch(() => {})}
         activeOpacity={0.75}
       >
         <MaterialIcons name="file-download" size={14} color="#1AAA94" />

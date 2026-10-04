@@ -23,6 +23,8 @@ import { useLanguage } from '../../context/LanguageContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UploadVideoModal from '../../components/UploadVideoModal';
 import VideoNewsCard, { VideoItem } from '../../components/VideoNewsCard';
+import PendingUploadsSheet from '../../components/PendingUploadsSheet';
+import { startQueueSyncWatcher } from '../../utils/uploadQueue';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const UNLOCK_KEY  = 'reporter_unlocked_v1';
@@ -56,6 +58,7 @@ async function fetchCFVideos(page = 1): Promise<VideoItem[]> {
           reach:        v.views         || 0,
           cautionFlag:  !!v.caution_flag,
           verified:     !!v.verified,
+          aspectRatio:  v.aspect_ratio  || '16:9',
         }));
         if (videos.length > 0) return videos; // success
       }
@@ -101,6 +104,8 @@ export default function VideoScreen() {
     AsyncStorage.getItem(UNLOCK_KEY)
       .then(v => setIsReporterUnlocked(v === 'true'))
       .catch(() => {});
+    const stopWatcher = startQueueSyncWatcher();
+    return stopWatcher;
   }, []);
 
   const loadVideos = useCallback(async (isRefresh = false) => {
@@ -140,7 +145,11 @@ export default function VideoScreen() {
   const handleLike = useCallback((id: string) => {
     setLikedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   }, []);
@@ -175,6 +184,7 @@ export default function VideoScreen() {
     return (
       <View style={[styles.centered, { paddingTop: insets.top }]}>
         <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
+        <PendingUploadsSheet language={language} />
         <MaterialIcons name="videocam-off" size={72} color="rgba(0,0,0,0.18)" />
         <Text style={styles.errTxt}>{error}</Text>
         <TouchableOpacity style={styles.retryBtn} onPress={() => loadVideos()}>
@@ -197,6 +207,7 @@ export default function VideoScreen() {
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      <PendingUploadsSheet language={language} />
 
       {/* Feed top header bar */}
       <View style={styles.feedHeader}>

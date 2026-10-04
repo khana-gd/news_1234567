@@ -78,12 +78,12 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
     setGpsLoad(false);
   };
 
-  const reset = () => {
+  const reset = useCallback(() => {
     setStep('pick'); setAsset(null); setTitle('');
     setDesc(''); setCategory('General'); setLocation('');
     setErrorMsg(null); setProgress(0); setProgMsg('');
-  };
-  const resetAndClose = () => { reset(); onClose(); };
+  }, []);
+  const resetAndClose = useCallback(() => { reset(); onClose(); }, [reset, onClose]);
 
   // ── Step 1: pick video ────────────────────────────────────────────────────
   const pickVideo = async () => {
@@ -113,6 +113,8 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
   // ── Navigate to editor ───────────────────────────────────────────────────
   const openEditor = useCallback(() => {
     if (!videoAsset) return;
+    const isPortrait = videoAsset.height && videoAsset.width ? (videoAsset.height > videoAsset.width) : false;
+    const aspectRatio = isPortrait ? '9:16' : '16:9';
     resetAndClose();
     router.push({
       pathname: '/video-editor' as any,
@@ -121,9 +123,10 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
         title: title || '',
         description: description || '',
         location: location || '',
+        aspectRatio,
       },
     });
-  }, [videoAsset, title, description, location, router]);
+  }, [videoAsset, title, description, location, resetAndClose, router]);
 
   // ── Step 2: upload via axios with real progress ──────────────────────────
   const handleUpload = async () => {
@@ -250,6 +253,16 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
                   </TouchableOpacity>
                 </View>
 
+                {/* Rural Network Optimizer Badge */}
+                <View style={styles.ruralBadge}>
+                  <MaterialIcons name="bolt" size={16} color="#4CAF50" />
+                  <Text style={styles.ruralBadgeTxt}>
+                    {isKn
+                      ? '⚡ ಗ್ರಾಮೀಣ ನೆಟ್‌ವರ್ಕ್ ಆಪ್ಟಿಮೈಜರ್: ಧಾರವಾಡ/ಹುಬ್ಬಳ್ಳಿ ಭಾಗದಲ್ಲಿ ಅಪ್ಲೋಡ್ ವೇಗ 10x ಹೆಚ್ಚಿಸಲಾಗಿದೆ'
+                      : '⚡ Rural Network Optimizer: Video will be optimized for fast 2G/3G/4G upload'}
+                  </Text>
+                </View>
+
                 {/* Title */}
                 <Text style={styles.fieldLbl}>{isKn ? 'ಶೀರ್ಷಿಕೆ *' : 'TITLE *'}</Text>
                 <TextInput
@@ -335,7 +348,7 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
                       {isKn ? 'ಸಂಪಾದಿಸಿ & ಅಪ್‌ಲೋಡ್' : 'Edit & Brand Video'}
                     </Text>
                     <Text style={styles.editSubTxt}>
-                      {isKn ? 'ಲೋಗೋ ಬರ್ನ್ → YouTube / ವೆಬ್‌ಸೈಟ್ ಆಯ್ಕೆ' : 'Burn logo → Choose: YouTube or Website'}
+                      {isKn ? 'ಲೋಗೋ ಬರ್ನ್ → ವಿಡಿಯೋ ಫೀಡ್‌ಗೆ ಅಪ್‌ಲೋಡ್' : 'Burn logo → Upload to Video Feed'}
                     </Text>
                   </View>
                   <MaterialIcons name="chevron-right" size={22} color="#fff" />
@@ -436,4 +449,6 @@ const styles = StyleSheet.create({
   successRing:{ width: 110, height: 110, borderRadius: 55, backgroundColor: 'rgba(76,175,80,0.18)', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   doneBtn:    { backgroundColor: '#fff', borderRadius: 30, paddingHorizontal: 48, paddingVertical: 14, marginTop: 12 },
   doneTxt:    { color: '#1AAA94', fontWeight: '800', fontSize: 16 },
+  ruralBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(76,175,80,0.18)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(76,175,80,0.3)' },
+  ruralBadgeTxt: { fontSize: 11, color: '#C8E6C9', fontWeight: '700', flex: 1, lineHeight: 16 },
 });

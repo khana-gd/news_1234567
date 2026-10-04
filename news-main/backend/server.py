@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -1191,8 +1192,17 @@ def d1_query(sql: str, params: list = None) -> list:
     """Execute SQL on Cloudflare D1 synchronously (use d1_query_async in FastAPI endpoints)."""
     if not CF_ACCOUNT_ID or not CF_API_TOKEN or not D1_DB_ID:
         import sqlite3
+        from pathlib import Path
         try:
-            conn = sqlite3.connect("d1_local.db")
+            # Look for d1_local.db in server.py directory, then in its parent directory, then fallback to current directory
+            db_path = Path(__file__).parent / "d1_local.db"
+            if not db_path.exists():
+                parent_db_path = Path(__file__).parent.parent / "d1_local.db"
+                if parent_db_path.exists():
+                    db_path = parent_db_path
+                else:
+                    db_path = Path("d1_local.db")
+            conn = sqlite3.connect(str(db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             if params:
@@ -1361,9 +1371,7 @@ def ensure_r2_bucket():
 
 
 def ensure_d1_tables():
-    """Create D1 tables if they don't exist."""
-    if not D1_DB_ID:
-        return
+    """Create D1 tables if they don't exist (works both locally and in production)."""
     tables = [
         """CREATE TABLE IF NOT EXISTS news_feed (
             id TEXT PRIMARY KEY,
@@ -1603,6 +1611,149 @@ async def generate_thumb_url():
     except Exception as e:
         logger.error(f"Failed to generate thumb presigned URL: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate thumbnail URL: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MULTIPART RESUMABLE UPLOAD (Optimized for Weak / Rural Networks like Dharwad & Hubli)
+# ─────────────────────────────────────────────────────────────────────────────
+@api_router.get("/network-ping")
+async def network_ping():
+    """Ultra-lightweight ping endpoint for mobile clients to test network connectivity."""
+    return {"ok": True, "ts": int(time.time() * 1000), "status": "online"}
+
+
+@api_router.post("/cf/multipart/init")
+async def init_multipart_upload(request: Request):
+    """
+    Initialise an S3/Cloudflare R2 multipart upload session for chunked video streaming.
+    Specially engineered for weak, fluctuating rural networks (Dharwad, Hubli taluks):
+    Allows uploading 5MB parts individually. If connection drops, only the current
+    chunk is retried, avoiding full re-upload of 50-200MB files.
+    """
+    if not R2_ACCESS_KEY_ID or not R2_SECRET_ACCESS_KEY:
+        raise HTTPException(status_code=503, detail="R2 upload credentials not configured.")
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    import math
+    file_size = int(data.get('file_size', 0))
+    content_type = data.get('content_type', 'video/mp4')
+    # Default 5MB minimum per part (S3 requirement for all parts except last)
+    part_size = max(5 * 1024 * 1024, int(data.get('part_size', 5 * 1024 * 1024)))
+
+    video_id = str(uuid.uuid4())
+    key = f'news_feed/videos/{video_id}.mp4'
+
+    try:
+        s3 = get_r2_s3_client()
+        mp = s3.create_multipart_upload(
+            Bucket=R2_BUCKET_NAME,
+            Key=key,
+            ContentType=content_type,
+        )
+        upload_id = mp['UploadId']
+
+        total_parts = max(1, math.ceil(file_size / part_size)) if file_size > 0 else 1
+
+        parts_info = []
+        for part_num in range(1, total_parts + 1):
+            part_url = s3.generate_presigned_url(
+                'upload_part',
+                Params={
+                    'Bucket': R2_BUCKET_NAME,
+                    'Key': key,
+                    'UploadId': upload_id,
+                    'PartNumber': part_num,
+                },
+                ExpiresIn=7200,  # 2 hours validity for slow network uploads
+            )
+            parts_info.append({
+                'part_number': part_num,
+                'upload_url': part_url,
+            })
+
+        logger.info(f"Initialized R2 multipart upload: video_id={video_id}, parts={total_parts}, upload_id={upload_id}")
+        return {
+            'success': True,
+            'upload_id': upload_id,
+            'video_id': video_id,
+            'key': key,
+            'part_size': part_size,
+            'total_parts': total_parts,
+            'parts': parts_info,
+        }
+    except Exception as e:
+        logger.error(f"Failed to init multipart upload: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to init multipart upload: {str(e)}")
+
+
+@api_router.post("/cf/multipart/complete")
+async def complete_multipart_upload(request: Request):
+    """Finalize an S3/R2 multipart upload once all parts are transferred."""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    key = data.get('key')
+    upload_id = data.get('upload_id')
+    video_id = data.get('video_id')
+    parts = data.get('parts', [])
+
+    if not key or not upload_id or not parts:
+        raise HTTPException(status_code=400, detail="key, upload_id, and parts list are required")
+
+    try:
+        s3 = get_r2_s3_client()
+        formatted_parts = []
+        for p in sorted(parts, key=lambda x: int(x.get('PartNumber', 0))):
+            etag = str(p.get('ETag', '')).strip('"')
+            formatted_parts.append({
+                'PartNumber': int(p['PartNumber']),
+                'ETag': f'"{etag}"',
+            })
+
+        res = s3.complete_multipart_upload(
+            Bucket=R2_BUCKET_NAME,
+            Key=key,
+            UploadId=upload_id,
+            MultipartUpload={'Parts': formatted_parts},
+        )
+        logger.info(f"Completed R2 multipart upload: video_id={video_id}, key={key}")
+        return {
+            'success': True,
+            'video_id': video_id,
+            'key': key,
+            'location': res.get('Location', '')
+        }
+    except Exception as e:
+        logger.error(f"Failed to complete multipart upload: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to complete multipart upload: {str(e)}")
+
+
+@api_router.post("/cf/multipart/abort")
+async def abort_multipart_upload(request: Request):
+    """Abort an uncompleted multipart upload session and free storage."""
+    try:
+        data = await request.json()
+    except Exception:
+        return {'success': False, 'error': 'Invalid JSON'}
+
+    key = data.get('key')
+    upload_id = data.get('upload_id')
+    if not key or not upload_id:
+        raise HTTPException(status_code=400, detail="key and upload_id are required")
+    try:
+        s3 = get_r2_s3_client()
+        s3.abort_multipart_upload(Bucket=R2_BUCKET_NAME, Key=key, UploadId=upload_id)
+        logger.info(f"Aborted R2 multipart upload: upload_id={upload_id}")
+        return {'success': True}
+    except Exception as e:
+        logger.warning(f"Failed to abort multipart upload: {e}")
+        return {'success': False, 'error': str(e)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1885,8 +2036,8 @@ async def save_cf_profile(request: Request):
     return {'success': True, 'id': profile_id}
 
 
-APK_R2_CDN_URL = "https://pub-053fe10649264831be10ca4454fe912c.r2.dev/apk/public-samachar-v6.apk"
-APK_SIZE_BYTES  = 128083424  # 122 MB
+APK_R2_CDN_URL = "https://pub-053fe10649264831be10ca4454fe912c.r2.dev/apk/public-samachar-v18.apk"
+APK_SIZE_BYTES  = 130709409  # 125 MB
 
 
 @api_router.api_route("/download/apk", methods=["GET", "HEAD"])
@@ -1903,7 +2054,7 @@ async def download_apk(request: Request):
                 "Content-Length":      str(APK_SIZE_BYTES),
                 "Content-Type":        "application/vnd.android.package-archive",
                 "Accept-Ranges":       "bytes",
-                "Content-Disposition": 'attachment; filename="PublicSamachar-v6.apk"',
+                "Content-Disposition": 'attachment; filename="PublicSamachar-v18.apk"',
                 "Cache-Control":       "no-cache",
             },
         )
@@ -1983,10 +2134,10 @@ async def download_page(request: Request):
   <h1>Public Samachar</h1>
   <p class="sub">Your local video news app</p>
 
-  <a class="btn" href="{APK_R2_CDN_URL}" download="PublicSamachar-v6.apk">
-    ⬇️ Download APK (122 MB)
+  <a class="btn" href="{APK_R2_CDN_URL}" download="PublicSamachar-v18.apk">
+    ⬇️ Download APK (125 MB)
   </a>
-  <p class="size">Version 6 &nbsp;·&nbsp; Android 6.0+ &nbsp;·&nbsp; Cloudflare CDN</p>
+  <p class="size">Version 18 &nbsp;·&nbsp; Android 6.0+ &nbsp;·&nbsp; Cloudflare CDN</p>
 
   <div class="tips">
     <h3>📋 Installation Tips:</h3>
@@ -1999,8 +2150,576 @@ async def download_page(request: Request):
     </ul>
   </div>
 
-  <p class="version">Public Samachar v6 · Crash-free Direct Upload</p>
+  <p class="version">Public Samachar v18 · Crash-free Direct Upload</p>
 </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@app.get("/download", response_class=HTMLResponse)
+async def root_download_page(request: Request):
+    """Root level redirect/render of the download page."""
+    return await download_page(request)
+
+
+@app.get("/delete-videos", response_class=HTMLResponse)
+@app.get("/delete-videos/", response_class=HTMLResponse)
+async def delete_videos_dashboard(request: Request):
+    """
+    Dedicated dashboard to browse, preview, and delete reporter-uploaded videos.
+    Supports running locally on your laptop or in production.
+    """
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Deletion Panel — Public Samachar</title>
+  <style>
+    :root {
+      --primary: #1AAA94;
+      --primary-dark: #0D8975;
+      --primary-soft: rgba(26, 170, 148, 0.15);
+      --danger: #EF4444;
+      --danger-dark: #DC2626;
+      --bg: #0F172A;
+      --card-bg: #1E293B;
+      --text: #F8FAFC;
+      --text-muted: #94A3B8;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background-color: rgba(11, 15, 25, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .logo-section { display: flex; align-items: center; gap: 12px; }
+    .logo-circle {
+      width: 40px; height: 40px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 20px; color: #fff;
+      box-shadow: 0 4px 10px rgba(26,170,148,0.3);
+    }
+    .title-area h1 { font-size: 18px; font-weight: 800; letter-spacing: 0.5px; }
+    .title-area p { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+    
+    .config-panel {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .config-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .config-field label {
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .config-input {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background-color: #0B0F19;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .config-input:focus { border-color: var(--primary); }
+
+    .btn {
+      padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
+      cursor: pointer; border: none; transition: all 0.2s; display: inline-flex;
+      align-items: center; justify-content: center; gap: 8px; text-decoration: none;
+      outline: none;
+    }
+    .btn-primary { background-color: var(--primary); color: #fff; }
+    .btn-primary:hover { background-color: var(--primary-dark); transform: translateY(-1px); }
+    .btn-danger { background-color: var(--danger); color: #fff; }
+    .btn-danger:hover { background-color: var(--danger-dark); transform: translateY(-1px); }
+    .btn-outline { background-color: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-outline:hover { background-color: var(--card-bg); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+
+    .container { max-width: 1200px; width: 100%; margin: 24px auto; padding: 0 24px; flex: 1; display: flex; flex-direction: column; }
+    
+    /* Stats & Search Bar */
+    .controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .search-wrap {
+      position: relative;
+      flex: 1;
+      max-width: 480px;
+      width: 100%;
+    }
+    .search-input {
+      width: 100%;
+      padding: 12px 16px 12px 42px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background-color: var(--card-bg);
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+      transition: all 0.2s;
+    }
+    .search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+    .search-icon {
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      color: var(--text-muted); font-size: 16px; pointer-events: none;
+    }
+    .stats-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stats-val { color: var(--primary); font-weight: 800; font-size: 16px; }
+
+    /* Grid */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 24px; }
+    .card {
+      background-color: var(--card-bg); border-radius: 16px; overflow: hidden;
+      border: 1px solid var(--border); display: flex; flex-direction: column;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.3); }
+    
+    .video-thumb-wrap { position: relative; width: 100%; aspect-ratio: 16/9; background-color: #000; cursor: pointer; overflow: hidden; }
+    .video-thumb-wrap.portrait { aspect-ratio: 9/16; max-height: 380px; }
+    .thumb-img { width: 100%; height: 100%; object-fit: cover; }
+    .thumb-placeholder {
+      width: 100%; height: 100%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; font-size: 32px;
+      background-color: #111; gap: 8px; color: var(--text-muted);
+    }
+    .thumb-placeholder p { font-size: 12px; }
+    .play-overlay {
+      position: absolute; inset: 0; background-color: rgba(0,0,0,0.4);
+      display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;
+    }
+    .video-thumb-wrap:hover .play-overlay { opacity: 1; }
+    .play-btn-circle {
+      width: 48px; height: 48px; border-radius: 50%; background-color: var(--primary);
+      display: flex; align-items: center; justify-content: center; font-size: 22px; color: #fff;
+      box-shadow: 0 4px 15px rgba(26, 170, 148, 0.4);
+    }
+    
+    .card-body { padding: 18px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+    .card-title { font-size: 15px; font-weight: 700; line-height: 1.4; color: var(--text); }
+    .card-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-muted); align-items: center; }
+    .badge {
+      padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 10px;
+      background-color: var(--border); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .badge-teal { background-color: var(--primary-soft); color: var(--primary); }
+    .badge-danger { background-color: rgba(239,68,68,0.15); color: var(--danger); }
+    .card-desc { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    
+    /* Reporter profile info */
+    .reporter-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .avatar {
+      width: 24px; height: 24px; border-radius: 50%;
+      background-color: var(--primary-dark); display: flex; align-items: center;
+      justify-content: center; font-size: 11px; font-weight: 700; color: #fff;
+    }
+    .rep-name { font-size: 12px; font-weight: 600; color: var(--text); }
+
+    .card-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+    
+    /* Video Player Modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background-color: rgba(15, 23, 42, 0.95);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+      opacity: 0; pointer-events: none; transition: opacity 0.25s ease-out;
+    }
+    .modal-overlay.active { opacity: 1; pointer-events: auto; }
+    .modal {
+      background-color: var(--card-bg); border-radius: 18px; border: 1px solid var(--border);
+      max-width: 800px; width: 100%; padding: 24px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      position: relative; text-align: center;
+    }
+    .player-modal video { width: 100%; aspect-ratio: 16/9; border-radius: 10px; background-color: #000; outline: none; }
+    .player-modal video.portrait { aspect-ratio: 9/16; max-height: 70vh; width: auto; margin: 0 auto; }
+    .player-modal-title { font-size: 16px; font-weight: 700; margin-top: 14px; text-align: left; }
+    .close-modal-btn { position: absolute; top: 12px; right: 16px; background: none; border: none; color: var(--text-muted); font-size: 28px; cursor: pointer; transition: color 0.2s; }
+    .close-modal-btn:hover { color: #fff; }
+    
+    /* Toast Notifications */
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
+    .toast {
+      background-color: var(--card-bg); border: 1px solid var(--border); color: #fff;
+      padding: 14px 24px; border-radius: 10px; font-size: 14px; font-weight: 600;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); border-left: 5px solid var(--primary);
+      animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .toast.error { border-left-color: var(--danger); }
+    
+    /* Empty & Loader States */
+    .loader { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 80px 0; color: var(--text-muted); }
+    .spinner { width: 36px; height: 36px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 80px 24px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 14px; background-color: rgba(30, 41, 59, 0.2); }
+    .empty-state-icon { font-size: 48px; }
+    
+    /* Pagination / Load More button */
+    .load-more-row {
+      display: flex;
+      justify-content: center;
+      margin: 32px 0 48px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes slideIn { from { transform: translateX(100%) translateY(0); opacity: 0; } to { transform: translateX(0) translateY(0); opacity: 1; } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo-section">
+      <div class="logo-circle">PS</div>
+      <div class="title-area">
+        <h1>Public Samachar</h1>
+        <p>Video Deletion Console</p>
+      </div>
+    </div>
+    
+    <!-- Admin Code Panel -->
+    <div class="config-panel">
+      <div class="config-field">
+        <label for="adminCode">ADMIN ACCESS CODE</label>
+        <input type="password" id="adminCode" class="config-input" style="min-width: 160px;" placeholder="APS2026" value="APS2026" onchange="saveConfig()">
+      </div>
+      <div style="font-size: 13px; color: var(--text-muted);" id="connectionStatus">
+        🟢 Connected
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Controls row -->
+    <div class="controls-row">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search by title, reporter, or location..." oninput="filterVideos()">
+      </div>
+      
+      <div class="stats-card">
+        <span>Videos loaded:</span>
+        <span class="stats-val" id="statsCount">0</span>
+      </div>
+    </div>
+
+    <!-- Feed Content -->
+    <div id="feedContent">
+      <div id="videosLoader" class="loader">
+        <div class="spinner"></div>
+        <p>Loading video uploads...</p>
+      </div>
+      
+      <div id="videosEmpty" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">🎥</div>
+        <h2>No Videos Found</h2>
+        <p>There are no video uploads matching your search.</p>
+      </div>
+
+      <div class="grid" id="videosGrid"></div>
+
+      <!-- Load More Row -->
+      <div class="load-more-row" id="loadMoreRow" style="display: none;">
+        <button class="btn btn-outline" id="loadMoreBtn" onclick="loadNextPage()">Load More Videos 🔄</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Video Player Modal -->
+  <div class="modal-overlay" id="playerOverlay" onclick="closePlayerModal()">
+    <div class="modal player-modal" onclick="event.stopPropagation()">
+      <button class="close-modal-btn" onclick="closePlayerModal()">&times;</button>
+      <div id="videoContainer"></div>
+      <div class="player-modal-title" id="playerModalTitle"></div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    let allVideos = [];
+    let currentPage = 1;
+    const limitPerPage = 24;
+    let hasMore = true;
+    let loading = false;
+
+    // Load config from localStorage on startup
+    document.addEventListener('DOMContentLoaded', () => {
+      const savedCode = localStorage.getItem('ps_moderator_admin_code');
+      if (savedCode) {
+        document.getElementById('adminCode').value = savedCode;
+      }
+      loadVideos(true);
+    });
+
+    function saveConfig() {
+      const code = document.getElementById('adminCode').value.trim();
+      localStorage.setItem('ps_moderator_admin_code', code);
+      showToast('Admin code updated!');
+      // Reload feed on code change
+      loadVideos(true);
+    }
+
+    function getAuthHeaders() {
+      const code = document.getElementById('adminCode').value.trim();
+      return { 
+        'X-Admin-Code': code,
+        'Content-Type': 'application/json'
+      };
+    }
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type === 'error' ? 'error' : ''}`;
+      toast.innerHTML = type === 'error' ? `❌ ${message}` : `✅ ${message}`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.animation = 'none';
+        toast.offsetHeight; // trigger reflow
+        toast.style.animation = 'slideIn 0.25s reverse forwards';
+        setTimeout(() => toast.remove(), 250);
+      }, 3000);
+    }
+
+    async function loadVideos(reset = false) {
+      if (loading) return;
+      loading = true;
+
+      if (reset) {
+        currentPage = 1;
+        allVideos = [];
+        hasMore = true;
+        document.getElementById('videosGrid').innerHTML = '';
+        document.getElementById('videosLoader').style.display = 'flex';
+        document.getElementById('videosEmpty').style.display = 'none';
+        document.getElementById('loadMoreRow').style.display = 'none';
+      }
+
+      try {
+        const resp = await fetch(`/api/cf/videos?page=${currentPage}&limit=${limitPerPage}`);
+        if (!resp.ok) throw new Error('Failed to load videos from backend API');
+        
+        const data = await resp.json();
+        const newVideos = data.videos || [];
+        
+        if (newVideos.length < limitPerPage) {
+          hasMore = false;
+        }
+
+        allVideos = allVideos.concat(newVideos);
+        renderVideos();
+
+        document.getElementById('videosLoader').style.display = 'none';
+        
+        if (allVideos.length === 0) {
+          document.getElementById('videosEmpty').style.display = 'flex';
+        } else if (hasMore) {
+          document.getElementById('loadMoreRow').style.display = 'flex';
+        } else {
+          document.getElementById('loadMoreRow').style.display = 'none';
+        }
+      } catch (e) {
+        document.getElementById('videosLoader').style.display = 'none';
+        showToast('Error loading video uploads. Please check backend connection.', 'error');
+        console.error(e);
+      } finally {
+        loading = false;
+      }
+    }
+
+    function loadNextPage() {
+      if (hasMore && !loading) {
+        currentPage++;
+        loadVideos(false);
+      }
+    }
+
+    function renderVideos() {
+      const grid = document.getElementById('videosGrid');
+      grid.innerHTML = '';
+      
+      const query = document.getElementById('searchInput').value.toLowerCase().trim();
+      
+      const filtered = allVideos.filter(v => {
+        if (!query) return true;
+        return (v.title || '').toLowerCase().includes(query) ||
+               (v.reporter_name || '').toLowerCase().includes(query) ||
+               (v.location || '').toLowerCase().includes(query);
+      });
+
+      document.getElementById('statsCount').textContent = filtered.length;
+
+      if (filtered.length === 0 && allVideos.length > 0) {
+        document.getElementById('videosEmpty').style.display = 'flex';
+      } else {
+        document.getElementById('videosEmpty').style.display = 'none';
+      }
+
+      filtered.forEach(video => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.id = `video-card-${video.id}`;
+        
+        const isPortrait = video.aspect_ratio === '9:16';
+        const dateStr = video.timestamp ? new Date(video.timestamp).toLocaleDateString() : 'N/A';
+        const initial = (video.reporter_name || 'R').charAt(0).toUpperCase();
+
+        card.innerHTML = `
+          <div class="video-thumb-wrap ${isPortrait ? 'portrait' : ''}" onclick="playVideo('${escapeJS(video.video_url)}', '${escapeJS(video.title)}', ${isPortrait})">
+            ${video.thumb_url ? `<img src="${video.thumb_url}" class="thumb-img" alt="Thumbnail" loading="lazy">` : `
+              <div class="thumb-placeholder">
+                🎬
+                <p>No Thumbnail</p>
+              </div>
+            `}
+            <div class="play-overlay">
+              <div class="play-btn-circle">▶</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="card-meta">
+              <span class="badge badge-teal">${escapeHTML(video.location || 'Karnataka')}</span>
+              ${isPortrait ? '<span class="badge">Portrait 9:16</span>' : '<span class="badge">Landscape 16:9</span>'}
+            </div>
+            <h3 class="card-title">${escapeHTML(video.title)}</h3>
+            
+            <div class="reporter-row">
+              <div class="avatar">${initial}</div>
+              <div class="rep-name">${escapeHTML(video.reporter_name || 'Reporter')}</div>
+            </div>
+
+            <div class="card-meta" style="margin-top: 2px;">
+              <span>📅 Uploaded: ${dateStr}</span>
+            </div>
+            <p class="card-desc">${escapeHTML(video.description || 'No description.')}</p>
+            
+            <div class="card-actions">
+              <button class="btn btn-danger btn-sm" onclick="deleteVideo('${video.id}')" style="width:100%;">
+                🗑️ Delete Video
+              </button>
+            </div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function filterVideos() {
+      renderVideos();
+    }
+
+    async function deleteVideo(videoId) {
+      const confirmMsg = "🚨 WARNING: This will permanently delete this video from storage (R2) and database (D1). This action cannot be undone. Are you sure you want to proceed?";
+      if (!confirm(confirmMsg)) return;
+
+      const code = document.getElementById('adminCode').value.trim();
+      if (!code) {
+        showToast('Please enter an Admin Access Code first.', 'error');
+        return;
+      }
+
+      showToast('Deleting video...');
+
+      try {
+        const resp = await fetch(`/api/cf/videos/${videoId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+
+        if (resp.ok) {
+          showToast('Video successfully deleted!');
+          // Remove from local list and re-render
+          allVideos = allVideos.filter(v => v.id !== videoId);
+          renderVideos();
+        } else {
+          const err = await resp.json().catch(() => ({}));
+          showToast(err.detail || 'Failed to delete video. Verify Admin Code.', 'error');
+        }
+      } catch (e) {
+        showToast('Network error deleting video.', 'error');
+        console.error(e);
+      }
+    }
+
+    function playVideo(videoUrl, title, isPortrait) {
+      const overlay = document.getElementById('playerOverlay');
+      const container = document.getElementById('videoContainer');
+      const titleEl = document.getElementById('playerModalTitle');
+      
+      titleEl.textContent = title;
+      container.innerHTML = `
+        <video id="modalVid" class="${isPortrait ? 'portrait' : ''}" controls autoplay playsinline>
+          <source src="${videoUrl}" type="video/mp4">
+          Your browser does not support HTML5 video.
+        </video>
+      `;
+      overlay.classList.add('active');
+    }
+
+    function closePlayerModal() {
+      const overlay = document.getElementById('playerOverlay');
+      const container = document.getElementById('videoContainer');
+      container.innerHTML = ''; // Stops playback
+      overlay.classList.remove('active');
+    }
+
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str.replace(/[&<>'"]/g, 
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+      );
+    }
+
+    function escapeJS(str) {
+      if (!str) return '';
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+  </script>
 </body>
 </html>"""
     return HTMLResponse(content=html)
@@ -2164,7 +2883,7 @@ async def video_share_page(video_id: str):
   <div class="logo-circle">PS</div>
   <h1>Video Not Found</h1>
   <p>This video may have been removed or the link is invalid.</p>
-  <a class="btn" href="https://mypublicsamachar.com/download">📲 Download Public Samachar App</a>
+  <a class="btn" href="{BACKEND_URL}/download">📲 Download Public Samachar App</a>
 </div></body></html>""", status_code=404)
     except Exception as e:
         logger.error(f"video_share_page error: {e}")
@@ -2180,11 +2899,11 @@ async def video_share_page(video_id: str):
     caution     = v.get('caution_flag', 0)
 
     share_url    = f"{BACKEND_URL}/api/cf/share/{video_id}"
+    download_url = f"{BACKEND_URL}/download"
     _nl          = '\n'
-    wa_text      = f"📺 {title}{_nl}{_nl}🔗 Watch here: {share_url}{_nl}{_nl}📲 Download Public Samachar App: https://mypublicsamachar.com/download"
+    wa_text      = f"📺 {title}{_nl}{_nl}🔗 Watch here: {share_url}{_nl}{_nl}📲 Download Public Samachar App: {download_url}"
     wa_encoded   = wa_text.replace(' ', '%20').replace('\n', '%0A')
     wa_url       = f"https://wa.me/?text={wa_encoded}"
-    download_url = "https://mypublicsamachar.com/download"
 
     # ── SECURITY: HTML-escape every user-controlled value before HTML interpolation ──
     # Prevents stored XSS via titles/descriptions/location/reporter names posted by users.
@@ -3493,6 +4212,135 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+async def auto_cleanup_storage():
+    """
+    Automated background worker to monitor R2 storage usage.
+    If total storage exceeds AUTO_CLEANUP_MAX_GB (default 9 GB), it automatically deletes
+    the oldest videos from R2 and D1 until the storage drops below AUTO_CLEANUP_TARGET_GB (default 8 GB).
+    """
+    # Sleep to allow the server process to start fully
+    await asyncio.sleep(10)
+    
+    # Configurable limits via environment variables (default: max 9GB, target 8GB)
+    max_gb_env = os.environ.get("AUTO_CLEANUP_MAX_GB", "")
+    target_gb_env = os.environ.get("AUTO_CLEANUP_TARGET_GB", "")
+    
+    max_gb = float(max_gb_env) if max_gb_env else 9.0
+    target_gb = float(target_gb_env) if target_gb_env else 8.0
+    
+    MAX_THRESHOLD_BYTES = int(max_gb * 1024 * 1024 * 1024)
+    TARGET_THRESHOLD_BYTES = int(target_gb * 1024 * 1024 * 1024)
+    
+    # Run every 6 hours
+    CHECK_INTERVAL_SECONDS = 6 * 3600
+    
+    while True:
+        try:
+            if not CF_ACCOUNT_ID or not R2_ACCESS_KEY_ID or not R2_SECRET_ACCESS_KEY:
+                logger.info("Auto-cleanup: Cloudflare credentials not fully set, skipping storage check.")
+                await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+                continue
+                
+            s3 = get_r2_s3_client()
+            loop = asyncio.get_event_loop()
+            
+            logger.info("Auto-cleanup: Calculating total R2 storage usage...")
+            
+            paginator = s3.get_paginator("list_objects_v2")
+            total_size_bytes = 0
+            all_objects = {}  # key -> size map
+            
+            def get_r2_stats():
+                size = 0
+                objs = {}
+                try:
+                    for page in paginator.paginate(Bucket=R2_BUCKET_NAME):
+                        if "Contents" in page:
+                            for obj in page["Contents"]:
+                                size += obj["Size"]
+                                objs[obj["Key"]] = obj["Size"]
+                except Exception as ex:
+                    logger.error(f"Auto-cleanup R2 listing error: {ex}")
+                return size, objs
+                
+            total_size_bytes, all_objects = await loop.run_in_executor(None, get_r2_stats)
+            total_gb = total_size_bytes / (1024 * 1024 * 1024)
+            logger.info(f"Auto-cleanup: Current R2 storage is {total_gb:.3f} GB ({total_size_bytes} bytes).")
+            
+            if total_size_bytes > MAX_THRESHOLD_BYTES:
+                logger.warning(f"Auto-cleanup: Storage limit exceeded {max_gb} GB. Starting cleanup until below {target_gb} GB...")
+                
+                # Fetch all videos sorted by timestamp ascending (oldest first)
+                old_videos = await d1_query_async(
+                    "SELECT id, title, video_url, thumb_url FROM news_feed ORDER BY timestamp ASC"
+                )
+                
+                if not old_videos:
+                    logger.warning("Auto-cleanup: Storage is full but no video records were found in D1 news_feed.")
+                else:
+                    deleted_count = 0
+                    bytes_freed = 0
+                    
+                    for v in old_videos:
+                        if total_size_bytes <= TARGET_THRESHOLD_BYTES:
+                            break
+                            
+                        video_id = v.get("id")
+                        if not video_id:
+                            continue
+                            
+                        video_key = f"news_feed/videos/{video_id}.mp4"
+                        thumb_key = f"news_feed/thumbs/{video_id}.jpg"
+                        
+                        if v.get("video_url"):
+                            vk = v["video_url"]
+                            if "/" in vk and vk.startswith("http"):
+                                video_key = vk.split(".dev/")[-1].split(".com/")[-1]
+                            else:
+                                video_key = vk
+                                
+                        if v.get("thumb_url"):
+                            tk = v["thumb_url"]
+                            if "/" in tk and tk.startswith("http"):
+                                thumb_key = tk.split(".dev/")[-1].split(".com/")[-1]
+                            else:
+                                thumb_key = tk
+                                
+                        v_size = all_objects.get(video_key, 0)
+                        t_size = all_objects.get(thumb_key, 0)
+                        video_space = v_size + t_size
+                        
+                        logger.info(f"Auto-cleanup: Deleting oldest video '{v.get('title')}' (ID: {video_id}) to free up ~{video_space / (1024 * 1024):.2f} MB")
+                        
+                        # A. Delete from R2
+                        try:
+                            await loop.run_in_executor(None, lambda: s3.delete_object(Bucket=R2_BUCKET_NAME, Key=video_key))
+                            if thumb_key:
+                                await loop.run_in_executor(None, lambda: s3.delete_object(Bucket=R2_BUCKET_NAME, Key=thumb_key))
+                        except Exception as e:
+                            logger.error(f"Auto-cleanup: Error deleting files from R2 for video {video_id}: {e}")
+                            
+                        # B. Delete from D1
+                        await d1_query_async("DELETE FROM news_feed WHERE id = ?", [video_id])
+                        await d1_query_async("DELETE FROM ps_comments WHERE video_id = ?", [video_id])
+                        await d1_query_async("DELETE FROM flagged_videos WHERE video_id = ?", [video_id])
+                        
+                        deleted_count += 1
+                        bytes_freed += video_space
+                        total_size_bytes -= video_space
+                        
+                    freed_mb = bytes_freed / (1024 * 1024)
+                    new_total_gb = total_size_bytes / (1024 * 1024 * 1024)
+                    logger.warning(f"Auto-cleanup complete: Deleted {deleted_count} oldest videos. Freed {freed_mb:.2f} MB of storage. Current storage is {new_total_gb:.3f} GB.")
+            else:
+                logger.info("Auto-cleanup: Storage is within safe limits.")
+                
+        except Exception as e:
+            logger.error(f"Auto-cleanup exception in background loop: {e}")
+            
+        await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize Cloudflare infrastructure and warm up the httpx async client."""
@@ -3504,6 +4352,10 @@ async def startup_event():
         await loop.run_in_executor(None, ensure_r2_bucket)
         await loop.run_in_executor(None, ensure_d1_tables)
         logger.info("Cloudflare infrastructure ready")
+        
+        # Start background storage auto-cleanup task
+        asyncio.create_task(auto_cleanup_storage())
+        logger.info("Background storage auto-cleanup worker started")
     except Exception as e:
         logger.warning(f"CF startup init error (non-fatal): {e}")
 

@@ -57,7 +57,6 @@ export default function RootLayout() {
               <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade' }} />
               <Stack.Screen name="preferences" options={{ headerShown: false, animation: 'slide_from_right' }} />
               <Stack.Screen name="video-editor" options={{ headerShown: false, animation: 'slide_from_bottom' }} />
-              <Stack.Screen name="youtube-upload" options={{ headerShown: false, animation: 'slide_from_bottom' }} />
               <Stack.Screen name="reporter-login" options={{ headerShown: false, animation: 'slide_from_bottom' }} />
             </Stack>
             {/* Global toast host — mounted once at root so it overlays everything */}
