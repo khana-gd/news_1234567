@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Public Samachar — Video Moderation Panel</title>
+  <style>
+    :root {
+      --primary: #1AAA94;
+      --primary-dark: #0D8975;
+      --primary-soft: rgba(26, 170, 148, 0.15);
+      --danger: #EF4444;
+      --danger-dark: #DC2626;
+      --bg: #0F172A;
+      --card-bg: #1E293B;
+      --text: #F8FAFC;
+      --text-muted: #94A3B8;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background-color: #0B0F19;
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo-section { display: flex; align-items: center; gap: 12px; }
+    .logo-circle {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 20px; color: #fff;
+      box-shadow: 0 4px 10px rgba(26,170,148,0.3);
+    }
+    .title-area h1 { font-size: 18px; font-weight: 800; letter-spacing: 0.5px; }
+    .title-area p { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+    
+    /* Config Panel */
+    .config-panel {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .config-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .config-field label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .config-input {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background-color: var(--bg);
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      min-width: 220px;
+      transition: border-color 0.2s;
+    }
+    .config-input:focus {
+      border-color: var(--primary);
+    }
+
+    .btn {
+      padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
+      cursor: pointer; border: none; transition: all 0.2s; display: inline-flex;
+      align-items: center; justify-content: center; gap: 8px; text-decoration: none;
+      outline: none;
+    }
+    .btn-primary { background-color: var(--primary); color: #fff; }
+    .btn-primary:hover { background-color: var(--primary-dark); transform: translateY(-1px); }
+    .btn-danger { background-color: var(--danger); color: #fff; }
+    .btn-danger:hover { background-color: var(--danger-dark); transform: translateY(-1px); }
+    .btn-outline { background-color: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-outline:hover { background-color: var(--card-bg); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+    
+    .container { max-width: 1200px; width: 100%; margin: 28px auto; padding: 0 24px; flex: 1; display: flex; flex-direction: column; }
+    
+    /* Tabs */
+    .tabs-bar { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 28px; }
+    .tabs { display: flex; gap: 12px; }
+    .tab-btn {
+      background: none; border: none; color: var(--text-muted); font-size: 15px; font-weight: 700;
+      padding: 10px 20px; cursor: pointer; transition: all 0.2s; border-radius: 8px;
+    }
+    .tab-btn:hover { color: var(--text); background-color: var(--card-bg); }
+    .tab-btn.active { color: #fff; background-color: var(--primary); }
+    
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
+    
+    /* Grid */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; }
+    .card { background-color: var(--card-bg); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); display: flex; flex-direction: column; transition: transform 0.2s, box-shadow 0.2s; }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 12px 20px rgba(0,0,0,0.3); }
+    
+    .video-thumb-wrap { position: relative; width: 100%; aspect-ratio: 16/9; background-color: #000; cursor: pointer; overflow: hidden; }
+    .video-thumb-wrap.portrait { aspect-ratio: 9/16; max-height: 400px; }
+    .thumb-img { width: 100%; height: 100%; object-fit: cover; }
+    .thumb-placeholder { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 32px; background-color: #111; gap: 8px; color: var(--text-muted); }
+    .thumb-placeholder p { font-size: 12px; }
+    .play-overlay {
+      position: absolute; inset: 0; background-color: rgba(0,0,0,0.4);
+      display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;
+    }
+    .video-thumb-wrap:hover .play-overlay { opacity: 1; }
+    .play-btn-circle {
+      width: 52px; height: 52px; border-radius: 50%; background-color: var(--primary);
+      display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff;
+      box-shadow: 0 4px 15px rgba(26,170,148,0.4);
+    }
+    
+    .card-body { padding: 18px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+    .card-title { font-size: 16px; font-weight: 700; line-height: 1.4; color: var(--text); }
+    .card-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-muted); align-items: center; }
+    .badge { padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 10px; background-color: var(--border); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge-teal { background-color: var(--primary-soft); color: var(--primary); }
+    .badge-danger { background-color: rgba(239,68,68,0.15); color: var(--danger); }
+    .card-desc { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .card-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+    
+    /* Video Player Modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background-color: rgba(15, 23, 42, 0.95);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+      opacity: 0; pointer-events: none; transition: opacity 0.25s ease-out;
+    }
+    .modal-overlay.active { opacity: 1; pointer-events: auto; }
+    .modal {
+      background-color: var(--card-bg); border-radius: 18px; border: 1px solid var(--border);
+      max-width: 800px; width: 100%; padding: 24px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      position: relative; text-align: center;
+    }
+    .player-modal video { width: 100%; aspect-ratio: 16/9; border-radius: 10px; background-color: #000; outline: none; }
+    .player-modal video.portrait { aspect-ratio: 9/16; max-height: 70vh; width: auto; margin: 0 auto; }
+    .player-modal-title { font-size: 16px; font-weight: 700; margin-top: 14px; text-align: left; }
+    .close-modal-btn { position: absolute; top: 12px; right: 16px; background: none; border: none; color: var(--text-muted); font-size: 28px; cursor: pointer; transition: color 0.2s; }
+    .close-modal-btn:hover { color: #fff; }
+    
+    /* Toast Notifications */
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
+    .toast {
+      background-color: var(--card-bg); border: 1px solid var(--border); color: #fff;
+      padding: 14px 24px; border-radius: 10px; font-size: 14.5px; font-weight: 600;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); border-left: 5px solid var(--primary);
+      animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .toast.error { border-left-color: var(--danger); }
+    
+    /* Empty & Loader States */
+    .loader { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 80px 0; color: var(--text-muted); }
+    .spinner { width: 36px; height: 36px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 80px 24px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 14px; background-color: rgba(30, 41, 59, 0.2); }
+    .empty-state-icon { font-size: 48px; }
+    
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes slideIn { from { transform: translateX(100%) translateY(0); opacity: 0; } to { transform: translateX(0) translateY(0); opacity: 1; } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo-section">
+      <div class="logo-circle">PS</div>
+      <div class="title-area">
+        <h1>Public Samachar</h1>
+        <p>Direct Moderation Console</p>
+      </div>
+    </div>
+    
+    <!-- Direct Config Connection Panel -->
+    <div class="config-panel">
+      <div class="config-field">
+        <label for="backendUrl">API BACKEND URL</label>
+        <input type="text" id="backendUrl" class="config-input" placeholder="https://..." value="https://public-samachar-api.onrender.com" onchange="saveConfig()">
+      </div>
+      <div class="config-field">
+        <label for="adminCode">ADMIN ACCESS CODE</label>
+        <input type="password" id="adminCode" class="config-input" style="min-width: 140px;" placeholder="APS2026" value="APS2026" onchange="saveConfig()">
+      </div>
+      <div class="config-field">
+        <label for="cleanupDays">CLEANUP THRESHOLD (DAYS)</label>
+        <input type="number" id="cleanupDays" class="config-input" style="min-width: 80px; max-width: 100px;" value="30" min="0">
+      </div>
+      <button class="btn btn-danger" onclick="runStorageCleanup()" style="align-self: flex-end; padding: 8px 16px; font-size: 13px;">🧹 Clean Old Videos</button>
+      <button class="btn btn-primary" onclick="loadAllData()" style="align-self: flex-end; padding: 8px 16px; font-size: 13px;">🔄 Reload Feed</button>
+      <a href="reporter_upload.html" class="btn btn-outline" style="align-self: flex-end; padding: 8px 16px; font-size: 13px;" title="Open News Reporter Video Upload Portal">📹 Reporter Upload</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Tabs Navigation -->
+    <div class="tabs-bar">
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('flagsTab', this)">⚠️ Review Flags</button>
+        <button class="tab-btn" onclick="switchTab('videosTab', this)">📺 All Video Feed</button>
+      </div>
+      <div style="font-size: 13px; color: var(--text-muted);" id="connectionStatus">
+        Connecting...
+      </div>
+    </div>
+
+    <!-- Review Flags Content -->
+    <div id="flagsTab" class="tab-content active">
+      <div id="flagsLoader" class="loader">
+        <div class="spinner"></div>
+        <p>Loading flags and checking video metadata...</p>
+      </div>
+      <div id="flagsEmpty" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">✅</div>
+        <h2>All Clear!</h2>
+        <p>There are no flagged videos pending review right now.</p>
+      </div>
+      <div class="grid" id="flagsGrid"></div>
+    </div>
+
+    <!-- All Video Feed Content -->
+    <div id="videosTab" class="tab-content">
+      <div id="videosLoader" class="loader">
+        <div class="spinner"></div>
+        <p>Loading video feed from Cloudflare D1...</p>
+      </div>
+      <div id="videosEmpty" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">🎥</div>
+        <h2>No Videos Found</h2>
+        <p>No video uploads have been registered in the database yet.</p>
+      </div>
+      <div class="grid" id="videosGrid"></div>
+    </div>
+  </div>
+
+  <!-- Video Player Modal Overlay -->
+  <div class="modal-overlay" id="playerOverlay" onclick="closePlayerModal()">
+    <div class="modal player-modal" onclick="event.stopPropagation()">
+      <button class="close-modal-btn" onclick="closePlayerModal()">&times;</button>
+      <div id="videoContainer"></div>
+      <div class="player-modal-title" id="playerModalTitle"></div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    let activeTab = 'flagsTab';
+    
+    // Load config from localStorage on startup
+    document.addEventListener('DOMContentLoaded', () => {
+      const savedUrl = localStorage.getItem('ps_moderator_backend_url');
+      const savedCode = localStorage.getItem('ps_moderator_admin_code');
+      
+      if (savedUrl) document.getElementById('backendUrl').value = savedUrl;
+      if (savedCode) document.getElementById('adminCode').value = savedCode;
+      
+      loadAllData();
+    });
+
+    function saveConfig() {
+      const url = document.getElementById('backendUrl').value.trim().replace(/\/$/, "");
+      const code = document.getElementById('adminCode').value.trim();
+      
+      localStorage.setItem('ps_moderator_backend_url', url);
+      localStorage.setItem('ps_moderator_admin_code', code);
+    }
+
+    function getBackendUrl() {
+      return document.getElementById('backendUrl').value.trim().replace(/\/$/, "");
+    }
+
+    function getAuthHeaders() {
+      const code = document.getElementById('adminCode').value.trim();
+      return { 
+        'X-Admin-Code': code,
+        'Content-Type': 'application/json'
+      };
+    }
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type === 'error' ? 'error' : ''}`;
+      toast.innerHTML = type === 'error' ? `❌ ${message}` : `✅ ${message}`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.animation = 'none';
+        toast.offsetHeight; // trigger reflow
+        toast.style.animation = 'slideIn 0.25s reverse forwards';
+        setTimeout(() => toast.remove(), 250);
+      }, 3500);
+    }
+
+    function switchTab(tabId, btn) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+      activeTab = tabId;
+    }
+
+    function updateConnectionStatus(success) {
+      const el = document.getElementById('connectionStatus');
+      if (success) {
+        el.textContent = '🟢 Online & Connected';
+        el.style.color = '#1AAA94';
+      } else {
+        el.textContent = '🔴 Disconnected or Invalid Admin Code';
+        el.style.color = '#EF4444';
+      }
+    }
+
+    function loadAllData() {
+      saveConfig();
+      loadFlags();
+      loadVideos();
+    }
+
+    async function loadFlags() {
+      const grid = document.getElementById('flagsGrid');
+      const loader = document.getElementById('flagsLoader');
+      const emptyState = document.getElementById('flagsEmpty');
+      
+      grid.innerHTML = '';
+      loader.style.display = 'flex';
+      emptyState.style.display = 'none';
+      
+      const backendUrl = getBackendUrl();
+      if (!backendUrl) {
+        loader.style.display = 'none';
+        showToast('Please specify a Backend API URL first.', 'error');
+        return;
+      }
+      
+      try {
+        const resp = await fetch(`${backendUrl}/api/admin/flagged-videos`, { headers: getAuthHeaders() });
+        if (resp.status === 403) {
+          loader.style.display = 'none';
+          updateConnectionStatus(false);
+          showToast('Invalid Admin Access Code.', 'error');
+          return;
+        }
+        if (!resp.ok) throw new Error('Failed to load flags');
+        
+        updateConnectionStatus(true);
+        const data = await resp.json();
+        const pendingFlags = (data.flags || []).filter(f => f.status === 'pending');
+        
+        if (pendingFlags.length === 0) {
+          loader.style.display = 'none';
+          emptyState.style.display = 'flex';
+          return;
+        }
+        
+        loader.style.display = 'none';
+        
+        for (const flag of pendingFlags) {
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.id = `flag-card-${flag.id}`;
+          
+          card.innerHTML = `
+            <div class="card-body">
+              <div class="card-meta">
+                <span class="badge badge-danger">FLAGGED: ${escapeHTML(flag.reason)}</span>
+              </div>
+              <p style="font-size:12px; color:var(--text-muted);">Loading video metadata...</p>
+            </div>
+          `;
+          grid.appendChild(card);
+          
+          // Fetch video details
+          fetchVideoDetails(flag.video_id).then(video => {
+            if (video) {
+              const isPortrait = video.aspect_ratio === '9:16';
+              card.innerHTML = `
+                <div class="video-thumb-wrap ${isPortrait ? 'portrait' : ''}" onclick="playVideo('${escapeJS(video.video_url)}', '${escapeJS(video.title)}', ${isPortrait})">
+                  ${video.thumb_url ? `<img src="${escapeHTML(video.thumb_url)}" class="thumb-img" alt="Video thumbnail">` : `
+                    <div class="thumb-placeholder">
+                      🎥
+                      <p>No Thumbnail</p>
+                    </div>
+                  `}
+                  <div class="play-overlay">
+                    <div class="play-btn-circle">▶</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="card-meta">
+                    <span class="badge badge-danger">FLAGGED: ${escapeHTML(flag.reason)}</span>
+                    <span class="badge badge-teal">${escapeHTML(video.location || 'Karnataka')}</span>
+                    ${isPortrait ? '<span class="badge">Portrait 9:16</span>' : '<span class="badge">Landscape 16:9</span>'}
+                  </div>
+                  <h3 class="card-title">${escapeHTML(video.title)}</h3>
+                  <div class="card-meta">
+                    <span>👤 ${escapeHTML(video.reporter_name)}</span>
+                    <span>•</span>
+                    <span>${new Date(video.timestamp).toLocaleDateString()}</span>
+                  </div>
+                  <p class="card-desc">${escapeHTML(video.description || 'No description.')}</p>
+                  <div class="card-actions">
+                    <button class="btn btn-outline btn-sm" onclick="dismissFlag('${escapeJS(flag.id)}')" style="flex:1;">✅ Mark Safe</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteVideo('${escapeJS(video.id)}', '${escapeJS(flag.id)}')" style="flex:1;">🗑️ Delete Video</button>
+                  </div>
+                </div>
+              `;
+            } else {
+              card.innerHTML = `
+                <div class="card-body">
+                  <div class="card-meta">
+                    <span class="badge badge-danger">FLAGGED: ${escapeHTML(flag.reason)}</span>
+                  </div>
+                  <h3 class="card-title" style="color:var(--danger)">Video Already Deleted or Not Found</h3>
+                  <p class="card-desc">The database contains a moderation flag, but the video record (ID: ${flag.video_id}) is no longer in the feed.</p>
+                  <div class="card-actions">
+                    <button class="btn btn-outline btn-sm" onclick="dismissFlag('${escapeJS(flag.id)}')" style="width:100%;">Dismiss Flag Record</button>
+                  </div>
+                </div>
+              `;
+            }
+          });
+        }
+      } catch (e) {
+        loader.style.display = 'none';
+        updateConnectionStatus(false);
+        showToast('Error loading flagged videos. Verify Backend URL.', 'error');
+      }
+    }
+
+    async function loadVideos() {
+      const grid = document.getElementById('videosGrid');
+      const loader = document.getElementById('videosLoader');
+      const emptyState = document.getElementById('videosEmpty');
+      
+      grid.innerHTML = '';
+      loader.style.display = 'flex';
+      emptyState.style.display = 'none';
+      
+      const backendUrl = getBackendUrl();
+      if (!backendUrl) return;
+      
+      try {
+        const resp = await fetch(`${backendUrl}/api/cf/videos?page=1&limit=100`);
+        if (!resp.ok) throw new Error('Failed to load video feed');
+        
+        const data = await resp.json();
+        const videos = data.videos || [];
+        
+        if (videos.length === 0) {
+          loader.style.display = 'none';
+          emptyState.style.display = 'flex';
+          return;
+        }
+        
+        loader.style.display = 'none';
+        
+        videos.forEach(video => {
+          const isPortrait = video.aspect_ratio === '9:16';
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.id = `video-card-${video.id}`;
+          
+          card.innerHTML = `
+            <div class="video-thumb-wrap ${isPortrait ? 'portrait' : ''}" onclick="playVideo('${escapeJS(video.video_url)}', '${escapeJS(video.title)}', ${isPortrait})">
+              ${video.thumb_url ? `<img src="${escapeHTML(video.thumb_url)}" class="thumb-img" alt="Video thumbnail">` : `
+                <div class="thumb-placeholder">
+                  🎥
+                  <p>No Thumbnail</p>
+                </div>
+              `}
+              <div class="play-overlay">
+                <div class="play-btn-circle">▶</div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="card-meta">
+                <span class="badge badge-teal">${escapeHTML(video.location || 'Karnataka')}</span>
+                <span>👀 ${video.views || 0} Views</span>
+                ${isPortrait ? '<span class="badge">Portrait 9:16</span>' : '<span class="badge">Landscape 16:9</span>'}
+              </div>
+              <h3 class="card-title">${escapeHTML(video.title)}</h3>
+              <div class="card-meta">
+                <span>👤 ${escapeHTML(video.reporter_name)}</span>
+                <span>•</span>
+                <span>${new Date(video.timestamp).toLocaleDateString()}</span>
+              </div>
+              <p class="card-desc">${escapeHTML(video.description || 'No description.')}</p>
+              <div class="card-actions">
+                <button class="btn btn-danger btn-sm" onclick="deleteVideo('${escapeJS(video.id)}')" style="width:100%;">🗑️ Delete Video</button>
+              </div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      } catch (e) {
+        loader.style.display = 'none';
+      }
+    }
+
+    async function fetchVideoDetails(videoId) {
+      const backendUrl = getBackendUrl();
+      try {
+        const resp = await fetch(`${backendUrl}/api/cf/post/${videoId}`);
+        if (resp.ok) {
+          return await resp.json();
+        }
+      } catch {}
+      return null;
+    }
+
+    async function dismissFlag(flagId) {
+      if (!confirm('Are you sure you want to dismiss this flag and mark this video as safe?')) return;
+      const backendUrl = getBackendUrl();
+      try {
+        const resp = await fetch(`${backendUrl}/api/admin/resolve-flag/${flagId}`, {
+          method: 'POST',
+          headers: getAuthHeaders()
+        });
+        if (resp.ok) {
+          showToast('Flag resolved and dismissed.');
+          loadFlags();
+        } else {
+          showToast('Failed to resolve flag.', 'error');
+        }
+      } catch {
+        showToast('Network error resolving flag.', 'error');
+      }
+    }
+
+    async function deleteVideo(videoId, flagId = null) {
+      if (!confirm('🚨 WARNING: This will permanently delete the video file from Cloudflare R2 and remove all entries from D1 (including comments/flags). Are you sure?')) return;
+      const backendUrl = getBackendUrl();
+      try {
+        const resp = await fetch(`${backendUrl}/api/cf/videos/${videoId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        if (resp.ok) {
+          showToast('Video permanently deleted.');
+          if (flagId) {
+            loadAllData();
+          } else {
+            const el = document.getElementById(`video-card-${videoId}`);
+            if (el) el.remove();
+            loadFlags();
+          }
+        } else {
+          const data = await resp.json().catch(() => ({}));
+          showToast(data.detail || 'Failed to delete video.', 'error');
+        }
+      } catch {
+        showToast('Network error deleting video.', 'error');
+      }
+    }
+
+    function playVideo(url, title, isPortrait) {
+      const container = document.getElementById('videoContainer');
+      const titleEl = document.getElementById('playerModalTitle');
+      
+      container.innerHTML = `
+        <video controls autoplay class="${isPortrait ? 'portrait' : ''}">
+          <source src="${url}" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      `;
+      titleEl.textContent = title;
+      document.getElementById('playerOverlay').classList.add('active');
+    }
+
+    function closePlayerModal() {
+      document.getElementById('playerOverlay').classList.remove('active');
+      document.getElementById('videoContainer').innerHTML = '';
+    }
+
+    async function runStorageCleanup() {
+      const days = document.getElementById('cleanupDays').value;
+      if (days === '' || days < 0) {
+        showToast('Please enter a valid non-negative number of days.', 'error');
+        return;
+      }
+      
+      const confirmMsg = `🚨 WARNING: This will permanently delete ALL videos older than ${days} days from database and storage. This action CANNOT be undone. Are you sure you want to proceed?`;
+      if (!confirm(confirmMsg)) return;
+      
+      const backendUrl = getBackendUrl();
+      if (!backendUrl) {
+        showToast('Please specify a Backend API URL first.', 'error');
+        return;
+      }
+      
+      showToast('Running cleanup, please wait...');
+      
+      try {
+        const resp = await fetch(`${backendUrl}/api/admin/cleanup-old-videos?days=${days}`, {
+          method: 'POST',
+          headers: getAuthHeaders()
+        });
+        
+        if (resp.ok) {
+          const data = await resp.json();
+          showToast(`Cleanup complete! Deleted ${data.count} old videos.`);
+          loadAllData();
+        } else {
+          const data = await resp.json().catch(() => ({}));
+          showToast(data.detail || 'Failed to run cleanup.', 'error');
+        }
+      } catch (e) {
+        showToast('Network error running cleanup.', 'error');
+      }
+    }
+
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str.replace(/[&<>'"]/g, 
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+      );
+    }
+    function escapeJS(str) {
+      if (!str) return '';
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+  </script>
+</body>
+</html>
