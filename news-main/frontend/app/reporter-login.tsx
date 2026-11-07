@@ -17,7 +17,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 const REPORTER_UNLOCK_KEY = 'reporter_unlocked_v1';
 
 export default function ReporterLoginScreen() {

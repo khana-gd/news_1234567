@@ -141,7 +141,7 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
 
     try {
       const filename = videoAsset.uri.split('/').pop() || `vid_${Date.now()}.mp4`;
-      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 
       const formData = new FormData();
       formData.append('title', title.trim());

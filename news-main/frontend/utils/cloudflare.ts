@@ -7,7 +7,7 @@
 const WORKER_URL =
   process.env.EXPO_PUBLIC_CF_WORKER_URL ||
   process.env.EXPO_PUBLIC_BACKEND_URL ||
-  '';
+  'https://public-samachar-api.onrender.com';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -89,7 +89,9 @@ export function ytToTikTok(v: {
 
 export async function fetchCFVideos(page = 1, limit = 10): Promise<CFVideoItem[]> {
   try {
-    const resp = await fetch(`${WORKER_URL}/api/cf/videos?page=${page}&limit=${limit}`);
+    const resp = await fetch(`${WORKER_URL}/api/cf/videos?page=${page}&limit=${limit}`, {
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
     if (!resp.ok) return [];
     const data = await resp.json();
     return data.videos || [];

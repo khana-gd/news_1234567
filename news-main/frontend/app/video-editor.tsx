@@ -29,7 +29,7 @@ import { enqueueUpload } from '../utils/uploadQueue';
 let VideoThumbnails: any = null;
 try { VideoThumbnails = require('expo-video-thumbnails'); } catch {}
 
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 
 // ── Resilient fetch with auto-retry ──────────────────────────────────────────
 async function fetchWithRetry(
@@ -384,15 +384,6 @@ export default function VideoEditorScreen() {
               <Text style={styles.noVideoTxt}>No video selected</Text>
             </View>
           )}
-
-          {/* Public Samachar logo badge overlay */}
-          <View pointerEvents="none" style={styles.videoBadge}>
-            <Image
-              source={require('../assets/images/video-badge.png')}
-              style={{ width: '100%', height: '100%' }}
-              resizeMode="contain"
-            />
-          </View>
         </View>
 
         <View style={styles.body}>
@@ -668,7 +659,6 @@ const styles = StyleSheet.create({
   previewWrap:   { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   noVideo:       { alignItems: 'center', gap: 12 },
   noVideoTxt:    { color: 'rgba(255,255,255,0.38)', fontSize: 14 },
-  videoBadge:    { position: 'absolute', top: 10, right: 12, width: 42, height: 42, borderRadius: 8, overflow: 'hidden' },
   body:          { padding: 16, gap: 14 },
   titleChip:     { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(33,150,243,0.12)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: 'rgba(33,150,243,0.25)' },
   titleChipTxt:  { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },

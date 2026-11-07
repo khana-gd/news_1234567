@@ -5,7 +5,7 @@ import { optimizeVideoForUpload, QualityMode } from './videoOptimizer';
 import { uploadVideoResiliently, checkNetworkReachable } from './resilientUpload';
 
 const QUEUE_STORAGE_KEY = '@ps_offline_upload_queue_v2';
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 
 // Permanent storage folder on device
 const QUEUE_DIR = `${FileSystem.documentDirectory || ''}queued_uploads/`;

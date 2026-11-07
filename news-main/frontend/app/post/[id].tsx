@@ -17,7 +17,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VideoNewsCard, { VideoItem } from '../../components/VideoNewsCard';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 const PS_GREEN    = '#1B5E20';
 
 export default function SinglePostScreen() {

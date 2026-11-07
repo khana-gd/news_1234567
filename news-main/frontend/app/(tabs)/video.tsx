@@ -26,25 +26,29 @@ import VideoNewsCard, { VideoItem } from '../../components/VideoNewsCard';
 import PendingUploadsSheet from '../../components/PendingUploadsSheet';
 import { startQueueSyncWatcher } from '../../utils/uploadQueue';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 const UNLOCK_KEY  = 'reporter_unlocked_v1';
 const PS_GREEN    = '#1B5E20';
 
-// ── Fetch Cloudflare / PS videos — 8 retries, up to 30s total ───────────────
+// ── Fetch Cloudflare / PS videos with resilient fallback ───────────────
 async function fetchCFVideos(page = 1): Promise<VideoItem[]> {
-  const MAX = 8;
+  const MAX = 3;
   for (let attempt = 1; attempt <= MAX; attempt++) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const timer = setTimeout(() => ctrl.abort(), 9000);
       const resp = await fetch(
         `${BACKEND_URL}/api/cf/videos?page=${page}&limit=20`,
-        { signal: ctrl.signal }
+        {
+          signal: ctrl.signal,
+          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+        }
       );
       clearTimeout(timer);
       if (resp.ok) {
         const data = await resp.json();
-        const videos = (data.videos || []).map((v: any) => ({
+        const rawList = Array.isArray(data?.videos) ? data.videos : [];
+        const videos: VideoItem[] = rawList.map((v: any) => ({
           id:           `cf_${v.id}`,
           title:        v.title        || '',
           description:  v.description  || '',
@@ -60,11 +64,14 @@ async function fetchCFVideos(page = 1): Promise<VideoItem[]> {
           verified:     !!v.verified,
           aspectRatio:  v.aspect_ratio  || '16:9',
         }));
-        if (videos.length > 0) return videos; // success
+        // Return immediately on valid response
+        return videos;
       }
-    } catch { /* network error — retry */ }
-    // Wait before retry: 1s, 2s, 3s … up to 5s
-    const delay = Math.min(attempt * 1000, 5000);
+    } catch (err) {
+      console.warn(`[VideoFeed] Fetch attempt ${attempt} error:`, err);
+    }
+    // Wait briefly before retry: 1s, 2s
+    const delay = Math.min(attempt * 1000, 2500);
     await new Promise(r => setTimeout(r, delay));
   }
   return [];
@@ -115,13 +122,17 @@ export default function VideoScreen() {
         const cached = await AsyncStorage.getItem('cf_videos_cache_v2');
         if (cached) {
           const { videos: cv } = JSON.parse(cached);
-          if (cv?.length > 0) { setVideos(cv); setLoading(false); }
+          if (cv?.length > 0) {
+            setVideos(cv);
+            setLoading(false);
+          }
         }
       } catch {}
     }
 
-    if (!isRefresh) setLoading(prev => prev); // keep false if cache set it
-    else            setRefreshing(true);
+    if (isRefresh) {
+      setRefreshing(true);
+    }
     setError(null);
 
     // Load ONLY Cloudflare D1/R2 videos — no YouTube, no WordPress mixed in
@@ -134,7 +145,12 @@ export default function VideoScreen() {
       AsyncStorage.setItem('cf_videos_cache_v2', JSON.stringify({ videos: cfItems, ts: Date.now() })).catch(() => {});
     } else {
       setLoading(false);
-      setError(isKn ? 'ಇನ್ನೂ ವಿಡಿಯೋ ಲಭ್ಯವಿಲ್ಲ' : 'No videos yet. Be the first to upload!');
+      setVideos(prev => {
+        if (prev.length === 0) {
+          setError(isKn ? 'ಇನ್ನೂ ವಿಡಿಯೋ ಲಭ್ಯವಿಲ್ಲ' : 'No videos yet. Be the first to upload!');
+        }
+        return prev;
+      });
     }
 
     setRefreshing(false);

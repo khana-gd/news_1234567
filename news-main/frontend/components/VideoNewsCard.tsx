@@ -14,7 +14,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import CommentSheet from './CommentSheet';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 
 let YoutubePlayer: any = null;
 try { YoutubePlayer = require('react-native-youtube-iframe').default; } catch {}
@@ -57,32 +57,50 @@ function timeAgo(ts: number): string {
 
 // ── Lazy video player: only created when user taps play ────────────────────
 // This avoids creating N player instances for N cards in the FlatList.
-// The player is instantiated ONLY when this component is mounted.
-function ActiveVideoPlayer({ url, onStop, isPortrait }: { url: string; onStop: () => void; isPortrait?: boolean }) {
+// Supports both Native (expo-video) and Web (HTML5 video).
+function NativeActiveVideoPlayer({ url, height, onStop }: { url: string; height: number; onStop: () => void }) {
   const [buffering, setBuffering] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const player = useVideoPlayer(url, (p) => {
     p.loop = false;
     try { p.play(); } catch {}
   });
 
-  // Detect when buffering/ready
   useEffect(() => {
     if (!player) return;
-    const sub = player.addListener('statusChange', (status: any) => {
-      if (status?.status === 'readyToPlay' || status?.isPlaying) {
+
+    try { player.play(); } catch {}
+
+    const statusSub = player.addListener('statusChange', (payload: any) => {
+      if (payload?.status === 'readyToPlay') {
+        setBuffering(false);
+        try { player.play(); } catch {}
+      } else if (payload?.status === 'error') {
+        setBuffering(false);
+        setErrorMsg('Unable to play video stream. Tap to retry.');
+      }
+    });
+
+    const playSub = player.addListener('playingChange', (payload: any) => {
+      if (payload?.isPlaying) {
         setBuffering(false);
       }
     });
-    // Also stop buffering indicator after 3s max
-    const t = setTimeout(() => setBuffering(false), 3000);
+
+    const timer = setTimeout(() => {
+      setBuffering(false);
+      try {
+        if (!player.playing) player.play();
+      } catch {}
+    }, 2500);
+
     return () => {
-      try { sub?.remove?.(); } catch {}
-      clearTimeout(t);
+      try { statusSub?.remove?.(); } catch {}
+      try { playSub?.remove?.(); } catch {}
+      clearTimeout(timer);
     };
   }, [player]);
-
-  const height = isPortrait ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16);
 
   return (
     <View style={{ width: W, height: height, backgroundColor: '#000' }}>
@@ -93,11 +111,26 @@ function ActiveVideoPlayer({ url, onStop, isPortrait }: { url: string; onStop: (
         nativeControls
         allowsFullscreen
       />
-      {buffering && (
+      {buffering && !errorMsg && (
         <View style={styles.bufferingOverlay} pointerEvents="none">
           <ActivityIndicator size="large" color="#fff" />
           <Text style={styles.bufferingTxt}>Loading video...</Text>
         </View>
+      )}
+      {errorMsg && (
+        <TouchableOpacity
+          style={styles.bufferingOverlay}
+          onPress={() => {
+            setErrorMsg(null);
+            setBuffering(true);
+            try { player.replay(); } catch { try { player.play(); } catch {} }
+          }}
+        >
+          <MaterialIcons name="error-outline" size={36} color="#EF4444" />
+          <Text style={[styles.bufferingTxt, { color: '#EF4444', textAlign: 'center', paddingHorizontal: 20 }]}>
+            {errorMsg}
+          </Text>
+        </TouchableOpacity>
       )}
       {/* Tap to stop */}
       <TouchableOpacity
@@ -111,6 +144,33 @@ function ActiveVideoPlayer({ url, onStop, isPortrait }: { url: string; onStop: (
   );
 }
 
+function ActiveVideoPlayer({ url, onStop, isPortrait }: { url: string; onStop: () => void; isPortrait?: boolean }) {
+  const height = isPortrait ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16);
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={{ width: W, height: height, backgroundColor: '#000', position: 'relative' }}>
+        {React.createElement('video', {
+          src: url,
+          controls: true,
+          autoPlay: true,
+          playsInline: true,
+          style: { width: '100%', height: '100%', objectFit: 'contain', backgroundColor: '#000' },
+        })}
+        <TouchableOpacity
+          style={styles.stopBtn}
+          onPress={onStop}
+          hitSlop={{ top: 4, right: 4, bottom: 4, left: 4 }}
+        >
+          <MaterialIcons name="close" size={18} color="#fff" />
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return <NativeActiveVideoPlayer url={url} height={height} onStop={onStop} />;
+}
+
 interface Props {
   item: VideoItem;
   isLiked: boolean;
@@ -119,6 +179,7 @@ interface Props {
 
 export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
   const [isPlaying, setIsPlaying]       = useState(false);
+  const [thumbError, setThumbError]     = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState('');
@@ -230,12 +291,28 @@ export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
             height={VIDEO_H}
             width={W}
             videoId={item.youtubeId!}
-            play={false}
+            play={isPlaying}
             webViewStyle={{ opacity: 0.99 }}
             initialPlayerParams={{ controls: true, modestbranding: true, rel: false }}
             onError={() => {}}
           />
-        ) : isCF && isPlaying && Platform.OS !== 'web' ? (
+        ) : isYT && isPlaying && Platform.OS === 'web' ? (
+          <View style={{ width: W, height: VIDEO_H, backgroundColor: '#000', position: 'relative' }}>
+            {React.createElement('iframe', {
+              src: `https://www.youtube.com/embed/${item.youtubeId}?autoplay=1`,
+              style: { width: '100%', height: '100%', border: 'none' },
+              allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture',
+              allowFullScreen: true,
+            })}
+            <TouchableOpacity
+              style={styles.stopBtn}
+              onPress={() => setIsPlaying(false)}
+              hitSlop={{ top: 4, right: 4, bottom: 4, left: 4 }}
+            >
+              <MaterialIcons name="close" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : isCF && isPlaying ? (
           <ActiveVideoPlayer
             url={item.videoUrl}
             onStop={() => setIsPlaying(false)}
@@ -243,15 +320,22 @@ export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
           />
         ) : (
           <TouchableOpacity
-            onPress={() => isCF && setIsPlaying(true)}
+            onPress={() => {
+              if (isCF || (isYT && (useYTPlayer || Platform.OS === 'web'))) {
+                setIsPlaying(true);
+              } else if (isYT && item.youtubeId) {
+                Linking.openURL(`https://www.youtube.com/watch?v=${item.youtubeId}`).catch(() => {});
+              }
+            }}
             activeOpacity={0.92}
             style={{ width: W, height: item.aspectRatio === '9:16' ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16) }}
           >
-            {item.thumbUrl ? (
+            {item.thumbUrl && !thumbError ? (
               <Image
                 source={{ uri: item.thumbUrl }}
                 style={{ width: W, height: item.aspectRatio === '9:16' ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16) }}
                 resizeMode="cover"
+                onError={() => setThumbError(true)}
               />
             ) : (
               <View style={[styles.thumbPlaceholder, { height: item.aspectRatio === '9:16' ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16) }]}>
@@ -263,7 +347,7 @@ export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
                 </View>
               </View>
             )}
-            {isCF && (
+            {(isCF || isYT) && (
               <View style={StyleSheet.absoluteFill} pointerEvents="none">
                 <View style={styles.playOverlay}>
                   <View style={styles.playCircle}>
@@ -282,15 +366,6 @@ export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
             <Text style={styles.locationTxt}>{item.location}</Text>
           </View>
         )}
-
-        {/* PS logo badge — top right (Part 2) */}
-        <View pointerEvents="none" style={styles.videoBadgeOverlay}>
-          <Image
-            source={require('../assets/images/video-badge.png')}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="contain"
-          />
-        </View>
       </View>
 
       {/* ── Branding Bar removed — using video badge overlay only ── */}
@@ -583,15 +658,6 @@ const styles = StyleSheet.create({
   },
   locationDot: { fontSize: 11 },
   locationTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  videoBadgeOverlay: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 42,
-    height: 42,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
   cautionBadge: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -80,6 +80,13 @@ export default function VideoPlayerModal({
                 showinfo: false,
               }}
             />
+          ) : Platform.OS === 'web' && videoId ? (
+            React.createElement('iframe', {
+              src: `https://www.youtube.com/embed/${videoId}?autoplay=1`,
+              style: { width: '100%', height: VIDEO_H, border: 'none' },
+              allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture',
+              allowFullScreen: true,
+            })
           ) : (
             <View style={s.webFallback}>
               <MaterialIcons name="play-circle-outline" size={64} color="rgba(255,255,255,0.5)" />

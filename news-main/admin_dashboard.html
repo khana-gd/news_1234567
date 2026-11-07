@@ -203,7 +203,7 @@
       </div>
       <div class="config-field">
         <label for="adminCode">ADMIN ACCESS CODE</label>
-        <input type="password" id="adminCode" class="config-input" style="min-width: 140px;" placeholder="APS2026" value="APS2026" onchange="saveConfig()">
+        <input type="password" id="adminCode" class="config-input" style="min-width: 160px;" placeholder="Enter Admin Code" onchange="saveConfig()">
       </div>
       <div class="config-field">
         <label for="cleanupDays">CLEANUP THRESHOLD (DAYS)</label>
@@ -276,7 +276,11 @@
       const savedUrl = localStorage.getItem('ps_moderator_backend_url');
       const savedCode = localStorage.getItem('ps_moderator_admin_code');
       
-      if (savedUrl) document.getElementById('backendUrl').value = savedUrl;
+      if (savedUrl) {
+        document.getElementById('backendUrl').value = savedUrl;
+      } else if (window.location.protocol.startsWith('http')) {
+        document.getElementById('backendUrl').value = window.location.origin;
+      }
       if (savedCode) document.getElementById('adminCode').value = savedCode;
       
       loadAllData();

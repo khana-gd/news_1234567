@@ -17,7 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguage } from '../../context/LanguageContext';
 import { showToast } from '../../components/Toast';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 const REPORTER_UNLOCK_KEY = 'reporter_unlocked_v1';
 const PROFILE_ID_KEY = 'cf_profile_id';
 const PROFILE_CACHE_KEY = 'cf_profile_cache';

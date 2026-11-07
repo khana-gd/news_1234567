@@ -18,7 +18,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 
 const WP_LOGIN_URL = process.env.EXPO_PUBLIC_WP_LOGIN_URL || 'https://mypublicsamachar.com/user-2/';
 const SUBMIT_NEWS_URL = process.env.EXPO_PUBLIC_SUBMIT_NEWS_URL || 'https://mypublicsamachar.com/submit-story/';
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 const REPORTER_UNLOCK_KEY = 'reporter_unlocked_v1';
 const PRIVACY_POLICY_URL = 'https://mypublicsamachar.com/privacy-policy/';
 const TERMS_URL = 'https://mypublicsamachar.com/terms-of-service/';

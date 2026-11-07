@@ -24,6 +24,9 @@ import boto3
 from botocore.config import Config as BotoConfig
 import secrets
 from collections import defaultdict
+import subprocess
+import shutil
+import tempfile
 import jwt as pyjwt  # PyJWT — reporter auth tokens
 
 # Thread pool for CPU-bound blocking I/O (boto3 presigned URLs only)
@@ -1591,7 +1594,10 @@ async def get_cf_videos(page: int = 1, limit: int = 15):
     cache_key = f"cf_videos_{page}_{limit}"
     cached = _cache_get(cache_key, ttl=30.0)
     if cached is not None:
-        return cached
+        return JSONResponse(
+            content=cached,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
 
     offset = (page - 1) * limit
     videos = await d1_query_async(
@@ -1606,7 +1612,10 @@ async def get_cf_videos(page: int = 1, limit: int = 15):
             v['thumb_url'] = f'{R2_PUBLIC_CDN}/{v["thumb_url"]}'
     result = {'videos': videos, 'page': page, 'limit': limit}
     _cache_set(cache_key, result)
-    return result
+    return JSONResponse(
+        content=result,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 
 @api_router.get("/generate-upload-url")
@@ -1886,7 +1895,11 @@ async def reporter_login(request: Request):
     elif password.lower() == 'newskannada.p.s':
         valid = True
         display_name = 'Girish P.S.' if username.lower() in ['girish', 'girish.p.s'] else username
-    elif secrets.compare_digest(password.upper(), REPORTER_ACCESS_CODE_ENV.upper()) or secrets.compare_digest(password.upper(), 'PS2026'):
+    elif (
+        secrets.compare_digest(password.upper(), REPORTER_ACCESS_CODE_ENV.upper())
+        or secrets.compare_digest(password.upper(), 'PS2026')
+        or secrets.compare_digest(password, ADMIN_ACCESS_CODE)
+    ):
         valid = True
 
     if not valid:
@@ -2008,6 +2021,47 @@ async def save_video_meta(request: Request, _auth: dict = Depends(require_report
     return {'success': True, 'video_id': video_id}
 
 
+def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int = 1280, crf: int = 26) -> bool:
+    """
+    Compress and web-optimize video using FFmpeg:
+    - Scales down to max_dim (720p HD) maintaining aspect ratio
+    - H.264 video with CRF 26 (fast, high visual fidelity, 70-85% size reduction)
+    - AAC audio stereo at 128kbps, 44.1kHz
+    - +faststart flag: relocates moov atom to start of file for zero-delay mobile streaming
+    """
+    if not shutil.which("ffmpeg"):
+        logger.warning("FFmpeg not found in system PATH. Skipping server-side compression.")
+        return False
+    try:
+        vf = f"scale='if(gt(iw,ih),min({max_dim},iw),-2)':'if(gt(iw,ih),-2,min({max_dim},ih))'"
+        cmd = [
+            "ffmpeg", "-y", "-i", input_path,
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", str(crf),
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
+        if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            orig_sz = os.path.getsize(input_path)
+            comp_sz = os.path.getsize(output_path)
+            ratio = ((orig_sz - comp_sz) / orig_sz) * 100 if orig_sz > 0 else 0
+            logger.info(f"Video compressed with FFmpeg: {orig_sz / 1024 / 1024:.2f}MB -> {comp_sz / 1024 / 1024:.2f}MB ({ratio:.1f}% reduction)")
+            return True
+        else:
+            logger.warning(f"FFmpeg returned non-zero code {res.returncode}")
+            return False
+    except Exception as e:
+        logger.warning(f"FFmpeg compression failed: {e}")
+        return False
+
+
 @api_router.post("/cf/upload")
 async def upload_cf_video(
     title: str = Form(...),
@@ -2023,9 +2077,8 @@ async def upload_cf_video(
     """
     Upload video to Cloudflare R2 and save metadata to D1.
 
-    Key design: video is STREAMED to R2 in a background thread via r2_upload_stream().
-    The async event loop is never blocked — all other users are served normally
-    while the upload is in progress.  No full-file RAM load.
+    Compresses raw video before Cloudflare R2 upload using FFmpeg (H.264 CRF 26 + AAC + faststart),
+    ensuring lightweight file size and instant mobile playback.
     """
     video_id = str(uuid.uuid4())
     ts = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -2035,17 +2088,55 @@ async def upload_cf_video(
     real_reporter_name = _auth.get('reporter_name') or reporter_name
     real_reporter_id   = _auth.get('reporter_id') or reporter_id
 
-    # ── Stream video to R2 in a thread pool (non-blocking, memory-efficient) ──
-    loop = asyncio.get_running_loop()
-    success = await loop.run_in_executor(
-        _upload_executor,
-        r2_upload_stream,
-        video_key,
-        video.file,
-        video.content_type or 'video/mp4',
-    )
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to upload video to storage. Please try again.")
+    # ── Temp directory for video compression ─────────────────────────────────
+    temp_dir = Path(tempfile.gettempdir()) / "ps_video_processing"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = temp_dir / f"{video_id}_raw.mp4"
+    compressed_path = temp_dir / f"{video_id}_compressed.mp4"
+
+    try:
+        # Save incoming video to temp file
+        with open(raw_path, "wb") as f_out:
+            while True:
+                chunk = await video.read(1024 * 1024)
+                if not chunk:
+                    break
+                f_out.write(chunk)
+
+        final_upload_path = raw_path
+
+        # Run FFmpeg compression in background thread
+        loop = asyncio.get_running_loop()
+        compress_ok = await loop.run_in_executor(
+            _upload_executor,
+            compress_video_with_ffmpeg,
+            str(raw_path),
+            str(compressed_path),
+            1280,
+            26,
+        )
+        if compress_ok and compressed_path.exists():
+            final_upload_path = compressed_path
+
+        # ── Stream compressed video to R2 in a thread pool ─────────────────────
+        with open(final_upload_path, "rb") as f_in:
+            success = await loop.run_in_executor(
+                _upload_executor,
+                r2_upload_stream,
+                video_key,
+                f_in,
+                'video/mp4',
+            )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to upload video to storage. Please try again.")
+    finally:
+        try:
+            if raw_path.exists():
+                raw_path.unlink()
+            if compressed_path.exists():
+                compressed_path.unlink()
+        except Exception:
+            pass
 
     # ── Upload thumbnail (small file — read into memory is fine) ────────────
     thumb_key = ''
@@ -2054,11 +2145,37 @@ async def upload_cf_video(
         thumb_key = f'news_feed/thumbs/{video_id}.jpg'
         if not r2_upload_object(thumb_key, thumb_data, thumbnail.content_type or 'image/jpeg'):
             thumb_key = ''
+    elif shutil.which("ffmpeg") and final_upload_path and Path(final_upload_path).exists():
+        # Auto-extract high-quality thumbnail poster frame if client didn't supply one
+        auto_thumb_path = temp_dir / f"{video_id}_thumb.jpg"
+        try:
+            cmd = [
+                "ffmpeg", "-y", "-ss", "00:00:01",
+                "-i", str(final_upload_path),
+                "-vframes", "1",
+                "-q:v", "2",
+                str(auto_thumb_path)
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+            if res.returncode == 0 and auto_thumb_path.exists() and auto_thumb_path.stat().st_size > 0:
+                thumb_data = auto_thumb_path.read_bytes()
+                thumb_key = f'news_feed/thumbs/{video_id}.jpg'
+                if not r2_upload_object(thumb_key, thumb_data, 'image/jpeg'):
+                    thumb_key = ''
+        except Exception as e:
+            logger.warning(f"Auto-thumbnail extraction failed: {e}")
+        finally:
+            if auto_thumb_path.exists():
+                try:
+                    auto_thumb_path.unlink()
+                except Exception:
+                    pass
 
     # ── Save metadata to D1 ──────────────────────────────────────────────────
+    caution_flag = 1 if _check_caution(title) else 0
     await d1_query_async(
-        'INSERT INTO news_feed (id, title, description, location, video_url, thumb_url, reporter_name, reporter_id, timestamp, aspect_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [video_id, title, description, location, video_key, thumb_key, real_reporter_name, real_reporter_id, ts, aspect_ratio]
+        'INSERT INTO news_feed (id, title, description, location, video_url, thumb_url, reporter_name, reporter_id, timestamp, caution_flag, aspect_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [video_id, title, description, location, video_key, thumb_key, real_reporter_name, real_reporter_id, ts, caution_flag, aspect_ratio]
     )
 
     video_url = f'{R2_PUBLIC_CDN}/{video_key}'
@@ -2304,6 +2421,7 @@ async def root_download_page(request: Request):
 
 @app.get("/reporter-upload", response_class=HTMLResponse)
 @app.get("/reporter-upload/", response_class=HTMLResponse)
+@app.get("/reporter_upload.html", response_class=HTMLResponse)
 @app.get("/upload", response_class=HTMLResponse)
 @app.get("/upload/", response_class=HTMLResponse)
 async def reporter_upload_portal(request: Request):
@@ -2595,7 +2713,7 @@ async def delete_videos_dashboard(request: Request):
     <div class="config-panel">
       <div class="config-field">
         <label for="adminCode">ADMIN ACCESS CODE</label>
-        <input type="password" id="adminCode" class="config-input" style="min-width: 160px;" placeholder="APS2026" value="APS2026" onchange="saveConfig()">
+        <input type="password" id="adminCode" class="config-input" style="min-width: 160px;" placeholder="Enter Admin Code" onchange="saveConfig()">
       </div>
       <div style="font-size: 13px; color: var(--text-muted);" id="connectionStatus">
         🟢 Connected

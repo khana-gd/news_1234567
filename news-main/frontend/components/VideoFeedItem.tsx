@@ -164,8 +164,16 @@ function VideoFeedItemComponent({ item, isActive, isLiked, onLike }: Props) {
               }}
               onError={() => {/* fail silently, user sees black */}}
             />
+          ) : Platform.OS === 'web' && ytVideoId ? (
+            /* ── WEB: Responsive YouTube Iframe ── */
+            React.createElement('iframe', {
+              src: `https://www.youtube.com/embed/${ytVideoId}?autoplay=${isActive ? 1 : 0}&mute=0`,
+              style: { width: '100%', height: '100%', border: 'none' },
+              allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture',
+              allowFullScreen: true,
+            })
           ) : (
-            /* ── WEB / fallback: static YouTube thumbnail (no redirect) ── */
+            /* ── fallback: static YouTube thumbnail (no redirect) ── */
             <View style={StyleSheet.absoluteFill}>
               <Image
                 source={item.thumbnail ? { uri: item.thumbnail } : PUBLISHER_LOGO}
@@ -178,19 +186,22 @@ function VideoFeedItemComponent({ item, isActive, isLiked, onLike }: Props) {
             </View>
           )
         ) : (
-          /* ── WordPress direct MP4: expo-video on native, placeholder on web ── */
-          Platform.OS === 'web' ? (
-            <View style={[StyleSheet.absoluteFill, styles.webFallback]}>
-              <MaterialIcons name="play-circle-filled" size={56} color="rgba(255,255,255,0.55)" />
-              <Text style={styles.webFallbackTxt} numberOfLines={2}>{item.title}</Text>
-            </View>
+          /* ── WordPress / Direct MP4: HTML5 video on web, expo-video on native ── */
+          Platform.OS === 'web' && item.url ? (
+            React.createElement('video', {
+              src: item.url,
+              controls: true,
+              autoPlay: isActive,
+              playsInline: true,
+              style: { width: '100%', height: '100%', objectFit: 'cover', backgroundColor: '#000' },
+            })
           ) : (
             <VideoView
               player={player}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
-              nativeControls={false}
-              allowsFullscreen={false}
+              nativeControls={true}
+              allowsFullscreen={true}
             />
           )
         )}
@@ -201,11 +212,6 @@ function VideoFeedItemComponent({ item, isActive, isLiked, onLike }: Props) {
           style={styles.bottomGrad}
           pointerEvents="none"
         />
-
-        {/* Logo watermark — TOP RIGHT */}
-        <View style={styles.logoWrap}>
-          <Image source={PUBLISHER_LOGO} style={styles.logoWatermark} resizeMode="contain" />
-        </View>
 
         {/* Location pill — BOTTOM LEFT */}
         {location ? (
@@ -354,23 +360,6 @@ const styles = StyleSheet.create({
     right: 0,
     height: 72,
     zIndex: 2,
-  },
-
-  // Logo watermark — top-right
-  logoWrap: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    zIndex: 10,
-    backgroundColor: 'rgba(0,0,0,0.22)',
-    borderRadius: 6,
-    padding: 3,
-  },
-  logoWatermark: {
-    width: 32,
-    height: 32,
-    borderRadius: 4,
-    opacity: 0.9,
   },
 
   // Location pill — bottom-left with teal gradient
