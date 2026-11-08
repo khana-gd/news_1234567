@@ -89,8 +89,18 @@ export default function VideoEditorScreen() {
 
   const player = useVideoPlayer(
     (Platform.OS === 'web' ? '' : (uri ?? '')),
-    (p) => { p.loop = false; p.muted = false; }
+    (p) => {
+      p.loop = true;
+      p.muted = false;
+      try { p.play(); } catch {}
+    }
   );
+
+  useEffect(() => {
+    if (player && uri) {
+      try { player.play(); } catch {}
+    }
+  }, [player, uri]);
 
   // ── Block hardware back during upload ────────────────────────────────────
   useEffect(() => {

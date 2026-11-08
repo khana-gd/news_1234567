@@ -345,10 +345,10 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
                   <MaterialIcons name="movie-filter" size={22} color="#fff" />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.wpUploadTxt}>
-                      {isKn ? 'ಸಂಪಾದಿಸಿ & ಅಪ್‌ಲೋಡ್' : 'Edit & Brand Video'}
+                      {isKn ? 'ವೀಡಿಯೊ ಮುನ್ನೋಟ & ಅಪ್‌ಲೋಡ್' : 'Preview & Upload Video'}
                     </Text>
                     <Text style={styles.editSubTxt}>
-                      {isKn ? 'ಲೋಗೋ ಬರ್ನ್ → ವಿಡಿಯೋ ಫೀಡ್‌ಗೆ ಅಪ್‌ಲೋಡ್' : 'Burn logo → Upload to Video Feed'}
+                      {isKn ? 'ಮುನ್ನೋಟ ಪರಿಶೀಲಿಸಿ → ವಿಡಿಯೋ ಫೀಡ್‌ಗೆ ಅಪ್‌ಲೋಡ್' : 'Fast preview → Upload to Video Feed'}
                     </Text>
                   </View>
                   <MaterialIcons name="chevron-right" size={22} color="#fff" />

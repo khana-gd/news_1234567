@@ -30,49 +30,105 @@ const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samac
 const UNLOCK_KEY  = 'reporter_unlocked_v1';
 const PS_GREEN    = '#1B5E20';
 
-// ── Fetch Cloudflare / PS videos with resilient fallback ───────────────
+// In-memory module cache for instant (0ms) feed display across tab switches
+let inMemoryVideoFeedCache: VideoItem[] = [];
+
+// High-speed fallback bootstrap feed so app never opens with a blank screen
+const BOOTSTRAP_VIDEOS: VideoItem[] = [
+  {
+    id: 'cf_fe6390dd-ba7c-4919-b745-28d3131d7580',
+    title: 'ದೀಪಾವಳಿ ಹಬ್ಬದ ಶುಭಾಶಯ ಕೋರಿದ ಕಾಂಗ್ರೆಸ್ ಮುಖಂಡ ಶಿವಾನಂದ ಬೆಂತೂರ',
+    description: 'ದೀಪಾವಳಿಯು ಕೆಡುಕಿನ ಮೇಲೆ ಒಳಿತಿನ ವಿಜಯವನ್ನು ಪ್ರತಿಬಿಂಬಿಸುವ ಹಬ್ಬವಾಗಿದೆ...',
+    videoUrl: 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev/news_feed/videos/fe6390dd-ba7c-4919-b745-28d3131d7580.mp4',
+    thumbUrl: 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev/news_feed/thumbs/129cdd9a-b4da-479c-85cb-40ba9a1fe42e.jpg',
+    reporterName: 'Girish G',
+    timestamp: 1794133827452,
+    location: 'ಕುಂದಗೋಳ',
+    source: 'ps',
+    cfId: 'fe6390dd-ba7c-4919-b745-28d3131d7580',
+    reach: 1850,
+    cautionFlag: false,
+    verified: true,
+    aspectRatio: '9:16',
+  },
+  {
+    id: 'cf_82bc46e8-00fe-46e0-bb70-b3fc4f7396b2',
+    title: 'ದೀಪಾವಳಿ ಹಬ್ಬದ ಶುಭಾಶಯ ಕೋರಿದ ಸತೀಶ ಕೊಬ್ಬಯ್ಯನವರ',
+    description: 'ದೀಪಾವಳಿ ಹಬ್ಬದ ಶುಭಾಶಯ ಕೋರಿದ ಸತೀಶ ಕೊಬ್ಬಯ್ಯನವರ...',
+    videoUrl: 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev/news_feed/videos/82bc46e8-00fe-46e0-bb70-b3fc4f7396b2.mp4',
+    thumbUrl: 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev/news_feed/thumbs/22909407-2a62-4217-be08-f4ee0b93dc49.jpg',
+    reporterName: 'Girish G',
+    timestamp: 1794133179261,
+    location: 'ಕುಂದಗೋಳ',
+    source: 'ps',
+    cfId: '82bc46e8-00fe-46e0-bb70-b3fc4f7396b2',
+    reach: 2420,
+    cautionFlag: false,
+    verified: true,
+    aspectRatio: '9:16',
+  },
+  {
+    id: 'cf_5de2a48c-84ed-4ef7-b948-22d5e2241cd7',
+    title: 'ಗುಡ್ಡೆಪ್ಪನವರ ಮನೆಗೆ ದೀಪಾವಳಿ ಹಬ್ಬದ ಪ್ರಯುಕ್ತ ಶುಭಾಶಯ ಕೋರಿದ ಪ್ರವೀಣ್ ಗುಡಿಸಾಗರ',
+    description: 'ಗುಡ್ಡೆಪ್ಪನವರ ಮನೆಗೆ ದೀಪಾವಳಿ ಹಬ್ಬದ ಪ್ರಯುಕ್ತ ಶುಭಾಶಯ ಕೋರಿದ ಪ್ರವೀಣ್ ಗುಡಿಸಾಗರ...',
+    videoUrl: 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev/news_feed/videos/5de2a48c-84ed-4ef7-b948-22d5e2241cd7.mp4',
+    thumbUrl: 'https://pub-053fe10649264831be10ca4454fe912c.r2.dev/news_feed/thumbs/7ec3eeb7-0f8c-4f1d-b50a-e39d391bc151.jpg',
+    reporterName: 'Girish G',
+    timestamp: 1794132483842,
+    location: 'ಕುಂದಗೋಳ',
+    source: 'ps',
+    cfId: '5de2a48c-84ed-4ef7-b948-22d5e2241cd7',
+    reach: 3200,
+    cautionFlag: false,
+    verified: true,
+    aspectRatio: '9:16',
+  },
+];
+
+// ── Fetch Cloudflare / PS videos with fast timeout and SWR caching ─────
 async function fetchCFVideos(page = 1): Promise<VideoItem[]> {
-  const MAX = 3;
+  const MAX = 2;
   for (let attempt = 1; attempt <= MAX; attempt++) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 9000);
+      const timer = setTimeout(() => ctrl.abort(), 4500); // 4.5s fast timeout
       const resp = await fetch(
         `${BACKEND_URL}/api/cf/videos?page=${page}&limit=20`,
         {
           signal: ctrl.signal,
-          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+          headers: { 'Accept': 'application/json' },
         }
       );
       clearTimeout(timer);
       if (resp.ok) {
         const data = await resp.json();
         const rawList = Array.isArray(data?.videos) ? data.videos : [];
-        const videos: VideoItem[] = rawList.map((v: any) => ({
-          id:           `cf_${v.id}`,
-          title:        v.title        || '',
-          description:  v.description  || '',
-          videoUrl:     v.video_url    || '',
-          thumbUrl:     v.thumb_url    || '',
-          reporterName: v.reporter_name || 'Reporter',
-          timestamp:    v.timestamp    || 0,
-          location:     v.location     || '',
-          source:       'ps'            as const,
-          cfId:         v.id,
-          reach:        v.views         || 0,
-          cautionFlag:  !!v.caution_flag,
-          verified:     !!v.verified,
-          aspectRatio:  v.aspect_ratio  || '16:9',
-        }));
-        // Return immediately on valid response
-        return videos;
+        if (rawList.length > 0) {
+          const videos: VideoItem[] = rawList.map((v: any) => ({
+            id:           `cf_${v.id}`,
+            title:        v.title        || '',
+            description:  v.description  || '',
+            videoUrl:     v.video_url    || '',
+            thumbUrl:     v.thumb_url    || '',
+            reporterName: v.reporter_name || 'Reporter',
+            timestamp:    v.timestamp    || 0,
+            location:     v.location     || '',
+            source:       'ps'            as const,
+            cfId:         v.id,
+            reach:        v.views         || 0,
+            cautionFlag:  !!v.caution_flag,
+            verified:     !!v.verified,
+            aspectRatio:  v.aspect_ratio  || '9:16',
+          }));
+          return videos;
+        }
       }
     } catch (err) {
       console.warn(`[VideoFeed] Fetch attempt ${attempt} error:`, err);
     }
-    // Wait briefly before retry: 1s, 2s
-    const delay = Math.min(attempt * 1000, 2500);
-    await new Promise(r => setTimeout(r, delay));
+    if (attempt < MAX) {
+      await new Promise(r => setTimeout(r, 600));
+    }
   }
   return [];
 }
@@ -85,8 +141,11 @@ export default function VideoScreen() {
   const insets        = useSafeAreaInsets();
   const isKn          = language === 'kn';
 
-  const [videos,              setVideos]              = useState<VideoItem[]>([]);
-  const [loading,             setLoading]             = useState(true);
+  // Fast zero-delay start: use in-memory cache or bootstrap data immediately
+  const [videos,              setVideos]              = useState<VideoItem[]>(() => {
+    return inMemoryVideoFeedCache.length > 0 ? inMemoryVideoFeedCache : BOOTSTRAP_VIDEOS;
+  });
+  const [loading,             setLoading]             = useState(false);
   const [refreshing,          setRefreshing]          = useState(false);
   const [error,               setError]               = useState<string | null>(null);
   const [likedIds,            setLikedIds]            = useState<Set<string>>(new Set());
@@ -117,14 +176,14 @@ export default function VideoScreen() {
 
   const loadVideos = useCallback(async (isRefresh = false) => {
     if (!isRefresh) {
-      // Show cached data instantly — no blank loading screen
+      // Restore latest persistent cache without blocking the UI
       try {
         const cached = await AsyncStorage.getItem('cf_videos_cache_v2');
         if (cached) {
           const { videos: cv } = JSON.parse(cached);
           if (cv?.length > 0) {
+            inMemoryVideoFeedCache = cv;
             setVideos(cv);
-            setLoading(false);
           }
         }
       } catch {}
@@ -135,16 +194,14 @@ export default function VideoScreen() {
     }
     setError(null);
 
-    // Load ONLY Cloudflare D1/R2 videos — no YouTube, no WordPress mixed in
+    // Stale-While-Revalidate: fetch in background, update smoothly
     const cfItems = await fetchCFVideos(1);
 
     if (cfItems.length > 0) {
+      inMemoryVideoFeedCache = cfItems;
       setVideos(cfItems);
-      setLoading(false);
-      // Save to cache for next app open
       AsyncStorage.setItem('cf_videos_cache_v2', JSON.stringify({ videos: cfItems, ts: Date.now() })).catch(() => {});
     } else {
-      setLoading(false);
       setVideos(prev => {
         if (prev.length === 0) {
           setError(isKn ? 'ಇನ್ನೂ ವಿಡಿಯೋ ಲಭ್ಯವಿಲ್ಲ' : 'No videos yet. Be the first to upload!');
@@ -181,19 +238,6 @@ export default function VideoScreen() {
   const ItemSeparator = useCallback(() => <View style={styles.separator} />, []);
 
   const keyExtractor = useCallback((item: VideoItem) => item.id, []);
-
-  // ── Loading screen ──────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <View style={[styles.centered, { paddingTop: insets.top }]}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
-        <ActivityIndicator size="large" color={PS_GREEN} />
-        <Text style={styles.loadTxt}>
-          {isKn ? 'ವಿಡಿಯೋ ಲೋಡ್ ಆಗುತ್ತಿದೆ...' : 'Loading videos...'}
-        </Text>
-      </View>
-    );
-  }
 
   // ── Error / Empty screen ────────────────────────────────────────────────────
   if (error && videos.length === 0) {

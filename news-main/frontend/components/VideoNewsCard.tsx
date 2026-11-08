@@ -88,16 +88,21 @@ function NativeActiveVideoPlayer({ url, height, onStop }: { url: string; height:
       }
     });
 
+    const timeSub = (player as any).addListener?.('timeUpdate', () => {
+      setBuffering(false);
+    });
+
     const timer = setTimeout(() => {
       setBuffering(false);
       try {
         if (!player.playing) player.play();
       } catch {}
-    }, 2500);
+    }, 1000);
 
     return () => {
       try { statusSub?.remove?.(); } catch {}
       try { playSub?.remove?.(); } catch {}
+      try { timeSub?.remove?.(); } catch {}
       clearTimeout(timer);
     };
   }, [player]);
@@ -112,9 +117,8 @@ function NativeActiveVideoPlayer({ url, height, onStop }: { url: string; height:
         allowsFullscreen
       />
       {buffering && !errorMsg && (
-        <View style={styles.bufferingOverlay} pointerEvents="none">
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.bufferingTxt}>Loading video...</Text>
+        <View style={styles.subtleBuffering} pointerEvents="none">
+          <ActivityIndicator size="small" color="#fff" />
         </View>
       )}
       {errorMsg && (
@@ -335,6 +339,7 @@ export default function VideoNewsCard({ item, isLiked, onLike }: Props) {
                 source={{ uri: item.thumbUrl }}
                 style={{ width: W, height: item.aspectRatio === '9:16' ? Math.round(W * 16 / 9) : Math.round(W * 9 / 16) }}
                 resizeMode="cover"
+                fadeDuration={0}
                 onError={() => setThumbError(true)}
               />
             ) : (
@@ -631,6 +636,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+  },
+  subtleBuffering: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
   },
   bufferingTxt: { color: '#fff', fontSize: 13, fontWeight: '600' },
   stopBtn: {

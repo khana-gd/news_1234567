@@ -1596,7 +1596,7 @@ async def get_cf_videos(page: int = 1, limit: int = 15):
     if cached is not None:
         return JSONResponse(
             content=cached,
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            headers={"Cache-Control": "public, max-age=15, stale-while-revalidate=60"}
         )
 
     offset = (page - 1) * limit
@@ -1614,7 +1614,7 @@ async def get_cf_videos(page: int = 1, limit: int = 15):
     _cache_set(cache_key, result)
     return JSONResponse(
         content=result,
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        headers={"Cache-Control": "public, max-age=15, stale-while-revalidate=60"}
     )
 
 

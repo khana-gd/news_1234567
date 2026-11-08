@@ -1,0 +1,16 @@
+backend/
+backend/.venv/
+**/node_modules/
+**/.metro-cache/
+**/.expo/
+publish/
+mockups/
+playstore_assets/
+*.db
+*.mp4
+*.exe
+*.dll
+*.pyc
+__pycache__/
+*.log
+
