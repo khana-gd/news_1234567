@@ -151,7 +151,7 @@ R2_PUBLIC_CDN = os.environ.get(
 # ── Meta / Facebook & Instagram Integration ──────────────────────────────────
 META_PAGE_ACCESS_TOKEN = os.environ.get(
     'META_PAGE_ACCESS_TOKEN',
-    'EAAVZA8BvcnicBTJoeFGxKendMfKwCbNDz3ASCd123aAXg3aTqxixsZB3U20k3ZAEJdXUmX1Meh0QsvBeJpHxmRrdN6jPZAQ1Yf4Tjs52QuAcWyYk8CO5UxIsIXSs0Q5Fe8KTOoJS1mpGqofgW6K6hbRCE2wYgupSnrZAdvdTZCcAau1HHvyoZCuEbMIsTgufaPWk918HuCWqJQfzEvmFq01QjggSCgUYrOvVXxjQ1N6ioAZD'
+    'EAAVZA8BvcnicBTKgezDZAb4SHxZAAH5hZATxpIzog0J7ZBA6sY7XPDZBDG9JKZCi91nryb3jcPS5PiBseM38pS29EcoPvUlokmUeNz6eB84yZBtVB8B2SN5Nlw3ZA0qhHZBZB7vcKBZBYDxZAEYMrZC2MUr9szfgb5SlRkcWJZA7EErQyuJsvWRxaIu1XYwirmmJgm3MapaoOTsa720RaMaHcZChHpZBPrg1oZCV8N2UtcreXoxpcFPgCCjuOn6YNq8cavvr9agmdTJrOvkwQhh6yq'
 )
 META_FB_PAGE_ID = os.environ.get('META_FB_PAGE_ID', '753264744542408')
 META_IG_ACCOUNT_ID = os.environ.get('META_IG_ACCOUNT_ID', '17841475943402557')
@@ -2263,9 +2263,9 @@ async def publish_video_to_instagram_reels(video_url: str, caption: str, cover_u
         logger.info(f"Instagram Reel container created: {container_id}, waiting for processing...")
         status_url = f"https://graph.facebook.com/v19.0/{container_id}"
         is_ready = False
-        for _ in range(15):
-            await asyncio.sleep(3)
-            s_resp = await client.get(status_url, params={"fields": "status_code", "access_token": META_PAGE_ACCESS_TOKEN})
+        for _ in range(50):
+            await asyncio.sleep(4)
+            s_resp = await client.get(status_url, params={"fields": "status_code", "access_token": META_PAGE_ACCESS_TOKEN}, timeout=15.0)
             s_data = s_resp.json()
             code = s_data.get("status_code")
             if code == "FINISHED":
@@ -2280,7 +2280,7 @@ async def publish_video_to_instagram_reels(video_url: str, caption: str, cover_u
             return {"success": False, "error": "Instagram processing timeout"}
         
         pub_url = f"https://graph.facebook.com/v19.0/{META_IG_ACCOUNT_ID}/media_publish"
-        pub_resp = await client.post(pub_url, data={"creation_id": container_id, "access_token": META_PAGE_ACCESS_TOKEN}, timeout=30.0)
+        pub_resp = await client.post(pub_url, data={"creation_id": container_id, "access_token": META_PAGE_ACCESS_TOKEN}, timeout=60.0)
         pub_data = pub_resp.json()
         if pub_resp.status_code in (200, 201) and "id" in pub_data:
             logger.info(f"Successfully published Reel to Instagram: {pub_data['id']}")
