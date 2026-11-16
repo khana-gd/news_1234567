@@ -1274,15 +1274,15 @@
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);" id="compressToggleLabel" data-i18n="lblCompressToggle">ಸ್ವಯಂಚಾಲಿತ ಸಂಕೋಚನ</span>
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);" id="compressToggleLabel" data-i18n="lblCompressToggle">ಸ್ವಯಂಚಾಲಿತ ಸಂಕೋಚನ (ಆಫ್)</span>
                 <label class="switch">
-                  <input type="checkbox" id="compressToggle" checked onchange="handleCompressToggleChange()">
+                  <input type="checkbox" id="compressToggle" onchange="handleCompressToggleChange()">
                   <span class="slider"></span>
                 </label>
               </div>
             </div>
 
-            <div id="compressionControls" style="display: flex; flex-direction: column; gap: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+            <div id="compressionControls" style="display: none; flex-direction: column; gap: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
               <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <label style="font-size: 12px; color: var(--text-muted); font-weight: 600;" data-i18n="lblCompressQuality">ಗುಣಮಟ್ಟ / ರೆಸಲ್ಯೂಶನ್:</label>
@@ -2162,7 +2162,8 @@
         let timeoutTimer = null;
 
         const video = document.createElement('video');
-        video.muted = true;
+        video.muted = false; // Must be false so AudioContext receives the live audio track
+        video.volume = 1.0;
         video.playsInline = true;
         video.preload = 'auto';
 
@@ -2240,9 +2241,13 @@
               const AudioContextClass = window.AudioContext || window.webkitAudioContext;
               if (AudioContextClass) {
                 audioCtx = new AudioContextClass();
+                if (audioCtx.state === 'suspended') {
+                  await audioCtx.resume().catch(() => {});
+                }
                 const source = audioCtx.createMediaElementSource(video);
                 const dest = audioCtx.createMediaStreamDestination();
                 source.connect(dest);
+                // dest streams audio directly to recorder; user's speakers remain silent
                 dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
               }
             } catch (aErr) {
@@ -2333,9 +2338,15 @@
               if (!isDone) finishEncoding();
             }, Math.max(15000, (duration * 1000) + 10000));
 
-            // Fast playback rate: 1.5x (maintains audio pitch and halves transcoding time)
-            video.playbackRate = 1.5;
-            await video.play();
+            // Real-time playback to ensure audio frames align accurately
+            video.playbackRate = 1.0;
+            try {
+              await video.play();
+            } catch (playErr) {
+              console.warn('Playback error during compression, fallback to original:', playErr);
+              cleanup();
+              return resolve(file);
+            }
             animId = requestAnimationFrame(drawLoop);
 
           } catch (initErr) {
