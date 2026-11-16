@@ -2678,20 +2678,21 @@
       xhr.upload.onprogress = (evt) => {
         if (evt.lengthComputable) {
           const rawPct = Math.round((evt.loaded / evt.total) * 100);
-          const pct = Math.min(95, 35 + Math.round(rawPct * 0.60));
           const elapsedSec = (Date.now() - startTime) / 1000;
           const speedBps = elapsedSec > 0 ? (evt.loaded / elapsedSec) : 0;
           const speedMb = (speedBps / (1024 * 1024)).toFixed(1);
           const loadedMb = (evt.loaded / (1024 * 1024)).toFixed(1);
           const totalMb = (evt.total / (1024 * 1024)).toFixed(1);
 
-          setProgress(pct, `${pct}%`);
           document.getElementById('progressBytesTxt').textContent = `${loadedMb} MB / ${totalMb} MB`;
           document.getElementById('progressSpeedTxt').textContent = `${speedMb} MB/s`;
 
-          if (pct < 85) {
+          if (rawPct < 100) {
+            const pct = Math.min(92, 10 + Math.round(rawPct * 0.82));
+            setProgress(pct, `${STATE.lang === 'kn' ? 'ಕ್ಲೌಡ್‌ಗೆ ಕಳುಹಿಸಲಾಗುತ್ತಿದೆ' : 'Uploading'}: ${rawPct}% (${loadedMb} / ${totalMb} MB)`);
             setStepActive('step2');
           } else {
+            setProgress(96, STATE.lang === 'kn' ? '⚡ 100% ಅಪ್ಲೋಡ್ ಆಗಿದೆ! ಕ್ಲೌಡ್ ಸರ್ವರ್‌ನಲ್ಲಿ ಸಂಸ್ಕರಣೆ ಮತ್ತು ಆಪ್ಟಿಮೈಸೇಶನ್ ನಡೆಯುತ್ತಿದೆ...' : '⚡ 100% Uploaded! Cloud server finalizing streaming on CDN...');
             setStepActive('step3');
           }
         }
