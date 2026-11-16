@@ -2129,12 +2129,12 @@ async def publish_video_to_facebook(video_url: str, title: str, description: str
         return {"success": False, "error": str(e)}
 
 
-async def publish_video_to_instagram_reels(video_url: str, caption: str) -> dict:
+async def publish_video_to_instagram_reels(video_url: str, caption: str, cover_url: Optional[str] = None, share_to_feed: bool = True) -> dict:
     """
     Publish video directly to Instagram Reels using Instagram Graph API:
-    Step 1: Create media container with media_type=REELS
+    Step 1: Create media container with media_type=REELS (supports custom HD cover_url)
     Step 2: Poll container status until FINISHED
-    Step 3: Publish container to live Instagram feed
+    Step 3: Publish container to live Instagram feed and Reels tab
     """
     if not META_PAGE_ACCESS_TOKEN or not META_IG_ACCOUNT_ID:
         return {"success": False, "error": "Meta Instagram credentials not configured"}
@@ -2145,9 +2145,11 @@ async def publish_video_to_instagram_reels(video_url: str, caption: str) -> dict
         "media_type": "REELS",
         "video_url": video_url,
         "caption": caption[:2200],
-        "share_to_feed": "true",
+        "share_to_feed": "true" if share_to_feed else "false",
         "access_token": META_PAGE_ACCESS_TOKEN
     }
+    if cover_url:
+        payload["cover_url"] = cover_url
     try:
         resp = await client.post(create_url, data=payload, timeout=30.0)
         create_data = resp.json()
@@ -2199,8 +2201,10 @@ async def upload_cf_video(
     video: UploadFile = File(...),
     thumbnail: Optional[UploadFile] = File(None),
     aspect_ratio: str = Form('16:9'),
+    video_quality: str = Form('1080p'),
     post_to_fb: bool = Form(False),
     post_to_ig: bool = Form(False),
+    ig_share_to_feed: bool = Form(True),
     _auth: dict = Depends(require_reporter_jwt),
 ):
     """
@@ -2234,15 +2238,17 @@ async def upload_cf_video(
 
         final_upload_path = raw_path
 
-        # Run FFmpeg compression in background thread
+        # Run FFmpeg compression in background thread (1080p Ultra HD or 720p HD)
         loop = asyncio.get_running_loop()
+        target_dim = 1920 if video_quality == '1080p' else 1280
+        target_crf = 20 if video_quality == '1080p' else 26
         compress_ok = await loop.run_in_executor(
             _upload_executor,
             compress_video_with_ffmpeg,
             str(raw_path),
             str(compressed_path),
-            1280,
-            26,
+            target_dim,
+            target_crf,
         )
         if compress_ok and compressed_path.exists():
             final_upload_path = compressed_path
@@ -2340,7 +2346,12 @@ async def upload_cf_video(
             await publish_video_to_facebook(video_url, title, description)
         if post_to_ig:
             caption_text = f"{title}\n\n{description}\n\n#PublicSamachar #Karnataka #News #Dharwad"
-            await publish_video_to_instagram_reels(video_url, caption_text)
+            await publish_video_to_instagram_reels(
+                video_url,
+                caption_text,
+                cover_url=thumb_url if thumb_url else None,
+                share_to_feed=ig_share_to_feed
+            )
 
     if post_to_fb or post_to_ig:
         asyncio.create_task(_send_social_bg())

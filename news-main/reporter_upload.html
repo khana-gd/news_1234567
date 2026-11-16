@@ -725,6 +725,18 @@
       border: 2px solid var(--primary-light);
       border-radius: 2px;
     }
+    .aspect-shape-11 {
+      width: 17px;
+      height: 17px;
+      border: 2px solid var(--primary-light);
+      border-radius: 2px;
+    }
+    .aspect-shape-45 {
+      width: 15px;
+      height: 19px;
+      border: 2px solid var(--primary-light);
+      border-radius: 2px;
+    }
 
     /* Thumbnail Studio */
     .thumb-preview-box {
@@ -1385,7 +1397,7 @@
         <!-- Aspect Ratio Selection -->
         <div class="form-group">
           <label class="form-label" data-i18n="lblAspect">ವಿಡಿಯೋ ಆಕಾರ (Aspect Ratio)</label>
-          <div class="aspect-selector">
+          <div class="aspect-selector" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
             <div class="aspect-option active" id="aspectOption169" onclick="setAspectRatio('16:9')">
               <div class="aspect-icon-box">
                 <div class="aspect-shape-169"></div>
@@ -1401,8 +1413,28 @@
                 <div class="aspect-shape-916"></div>
               </div>
               <div>
-                <div style="font-size: 13px; font-weight: 700; color: #fff;">9:16 Portrait</div>
-                <div style="font-size: 11px; color: var(--text-muted);" data-i18n="aspectShorts">ಶಾರ್ಟ್ಸ್ / ರೀಲ್ಸ್ / ಸ್ಟೋರೀಸ್</div>
+                <div style="font-size: 13px; font-weight: 700; color: #fff;">9:16 Reel / Story</div>
+                <div style="font-size: 11px; color: var(--text-muted);" data-i18n="aspectShorts">ಇನ್‌ಸ್ಟಾ ರೀಲ್ಸ್ / ಶಾರ್ಟ್ಸ್</div>
+              </div>
+            </div>
+
+            <div class="aspect-option" id="aspectOption11" onclick="setAspectRatio('1:1')">
+              <div class="aspect-icon-box">
+                <div class="aspect-shape-11"></div>
+              </div>
+              <div>
+                <div style="font-size: 13px; font-weight: 700; color: #fff;">1:1 Square</div>
+                <div style="font-size: 11px; color: var(--text-muted);">ಇನ್‌ಸ್ಟಾ / ಫೇಸ್‌ಬುಕ್ ಫೀಡ್</div>
+              </div>
+            </div>
+
+            <div class="aspect-option" id="aspectOption45" onclick="setAspectRatio('4:5')">
+              <div class="aspect-icon-box">
+                <div class="aspect-shape-45"></div>
+              </div>
+              <div>
+                <div style="font-size: 13px; font-weight: 700; color: #fff;">4:5 Portrait</div>
+                <div style="font-size: 11px; color: var(--text-muted);">ಪೋರ್ಟ್ರೇಟ್ ಫೀಡ್ ಪೋಸ್ಟ್</div>
               </div>
             </div>
           </div>
@@ -1540,6 +1572,28 @@
               </div>
               <input type="checkbox" id="syncIgToggle" checked style="accent-color: #E4405F; width: 18px; height: 18px; cursor: pointer;">
             </label>
+          </div>
+
+          <!-- Instagram Advanced Options & Highest Quality -->
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 13px;">📸</span>
+                <span style="font-size: 11.5px; font-weight: 700; color: #fff;">ಇನ್‌ಸ್ಟಾಗ್ರಾಮ್ ಪ್ರಕಟಣೆ ಗುಣಮಟ್ಟ (Upload Quality):</span>
+              </div>
+              <select id="videoQualitySelect" class="form-input" style="padding: 4px 8px; font-size: 11.5px; width: auto; height: auto; background: #0e1626; color: #25d366; font-weight: 700; border-color: rgba(37,211,102,0.4);">
+                <option value="1080p" selected>👑 1080p Ultra HD (ಗರಿಷ್ಠ ಸ್ಪಷ್ಟತೆ — Instagram Recommended)</option>
+                <option value="720p">⚡ 720p HD (ವೇಗದ ಅಪ್ಲೋಡ್ — Data Saver)</option>
+              </select>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 6px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); cursor: pointer;">
+                <input type="checkbox" id="igShareToFeedToggle" checked style="accent-color: #E4405F; cursor: pointer;">
+                <span>ಪ್ರೊಫೈಲ್ ಗ್ರಿಡ್‌ನಲ್ಲೂ ಪ್ರಕಟಿಸಿ (Share to Profile Grid)</span>
+              </label>
+              <span style="font-size: 10.5px; color: var(--primary-light);">🖼️ ಆಯ್ಕೆಮಾಡಿದ HD ಥಂಬ್‌ನೇಲ್ ಕವರ್ ಚಿತ್ರವಾಗುತ್ತದೆ</span>
+            </div>
           </div>
         </div>
 
@@ -2447,17 +2501,28 @@
     // ── Aspect Ratio Controls ────────────────────────────────────────────────
     function setAspectRatio(ratio) {
       STATE.aspectRatio = ratio;
-      const isPortrait = (ratio === '9:16');
+      const isPortrait = (ratio === '9:16' || ratio === '4:5');
+      const isSquare = (ratio === '1:1');
 
-      document.getElementById('aspectOption169').classList.toggle('active', !isPortrait);
-      document.getElementById('aspectOption916').classList.toggle('active', isPortrait);
-      document.getElementById('monitorModeBadge').textContent = isPortrait ? '9:16 SHORTS' : '16:9 PREVIEW';
+      ['169', '916', '11', '45'].forEach(r => {
+        const el = document.getElementById('aspectOption' + r);
+        if (el) el.classList.remove('active');
+      });
+      const activeEl = document.getElementById('aspectOption' + ratio.replace(':', ''));
+      if (activeEl) activeEl.classList.add('active');
+
+      document.getElementById('monitorModeBadge').textContent = ratio + (isPortrait ? ' PORTRAIT' : isSquare ? ' SQUARE' : ' LANDSCAPE');
 
       const player = document.getElementById('previewVideoPlayer');
       player.classList.toggle('portrait', isPortrait);
 
       const thumbWrap = document.getElementById('thumbPreviewWrap');
-      thumbWrap.style.aspectRatio = isPortrait ? '9/16' : '16/9';
+      if (thumbWrap) {
+        if (ratio === '9:16') thumbWrap.style.aspectRatio = '9/16';
+        else if (ratio === '4:5') thumbWrap.style.aspectRatio = '4/5';
+        else if (ratio === '1:1') thumbWrap.style.aspectRatio = '1/1';
+        else thumbWrap.style.aspectRatio = '16/9';
+      }
     }
 
     // ── Category Chips & Quick Location ───────────────────────────────────────
@@ -2563,6 +2628,11 @@
       const postToIg = document.getElementById('syncIgToggle')?.checked || false;
       formData.append('post_to_fb', postToFb ? 'true' : 'false');
       formData.append('post_to_ig', postToIg ? 'true' : 'false');
+
+      const vQuality = document.getElementById('videoQualitySelect')?.value || '1080p';
+      const igShareFeed = document.getElementById('igShareToFeedToggle')?.checked !== false;
+      formData.append('video_quality', vQuality);
+      formData.append('ig_share_to_feed', igShareFeed ? 'true' : 'false');
 
       // Auto-capture video thumbnail if not already present
       if (!STATE.customThumbBlob) {
