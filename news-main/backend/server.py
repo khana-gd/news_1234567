@@ -148,6 +148,14 @@ R2_PUBLIC_CDN = os.environ.get(
     'https://pub-053fe10649264831be10ca4454fe912c.r2.dev'
 )
 
+# ── Meta / Facebook & Instagram Integration ──────────────────────────────────
+META_PAGE_ACCESS_TOKEN = os.environ.get(
+    'META_PAGE_ACCESS_TOKEN',
+    'EAAVZA8BvcnicBTJoeFGxKendMfKwCbNDz3ASCd123aAXg3aTqxixsZB3U20k3ZAEJdXUmX1Meh0QsvBeJpHxmRrdN6jPZAQ1Yf4Tjs52QuAcWyYk8CO5UxIsIXSs0Q5Fe8KTOoJS1mpGqofgW6K6hbRCE2wYgupSnrZAdvdTZCcAau1HHvyoZCuEbMIsTgufaPWk918HuCWqJQfzEvmFq01QjggSCgUYrOvVXxjQ1N6ioAZD'
+)
+META_FB_PAGE_ID = os.environ.get('META_FB_PAGE_ID', '753264744542408')
+META_IG_ACCOUNT_ID = os.environ.get('META_IG_ACCOUNT_ID', '17841475943402557')
+
 # ── JWT Reporter Auth config ───────────────────────────────────────────────────
 # Secret key for signing JWT tokens — loaded from environment
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY')
@@ -2091,6 +2099,96 @@ def optimize_thumbnail_image(image_bytes: bytes, max_dim: int = 1280, quality: i
         return image_bytes
 
 
+async def publish_video_to_facebook(video_url: str, title: str, description: str) -> dict:
+    """
+    Publish video directly to Facebook Page using Meta Graph API.
+    Streams directly from Cloudflare R2 public CDN via file_url.
+    """
+    if not META_PAGE_ACCESS_TOKEN or not META_FB_PAGE_ID:
+        return {"success": False, "error": "Meta Facebook credentials not configured"}
+    
+    url = f"https://graph.facebook.com/v19.0/{META_FB_PAGE_ID}/videos"
+    client = get_async_client()
+    payload = {
+        "file_url": video_url,
+        "title": title[:250],
+        "description": f"{title}\n\n{description}".strip(),
+        "access_token": META_PAGE_ACCESS_TOKEN
+    }
+    try:
+        resp = await client.post(url, data=payload, timeout=60.0)
+        data = resp.json()
+        if resp.status_code in (200, 201) and "id" in data:
+            logger.info(f"Successfully published video to Facebook Page: {data['id']}")
+            return {"success": True, "fb_video_id": data["id"]}
+        else:
+            logger.warning(f"Facebook video publish error: {data}")
+            return {"success": False, "error": data.get("error", {}).get("message", "FB publish failed")}
+    except Exception as e:
+        logger.error(f"Error publishing to Facebook: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def publish_video_to_instagram_reels(video_url: str, caption: str) -> dict:
+    """
+    Publish video directly to Instagram Reels using Instagram Graph API:
+    Step 1: Create media container with media_type=REELS
+    Step 2: Poll container status until FINISHED
+    Step 3: Publish container to live Instagram feed
+    """
+    if not META_PAGE_ACCESS_TOKEN or not META_IG_ACCOUNT_ID:
+        return {"success": False, "error": "Meta Instagram credentials not configured"}
+    
+    client = get_async_client()
+    create_url = f"https://graph.facebook.com/v19.0/{META_IG_ACCOUNT_ID}/media"
+    payload = {
+        "media_type": "REELS",
+        "video_url": video_url,
+        "caption": caption[:2200],
+        "share_to_feed": "true",
+        "access_token": META_PAGE_ACCESS_TOKEN
+    }
+    try:
+        resp = await client.post(create_url, data=payload, timeout=30.0)
+        create_data = resp.json()
+        container_id = create_data.get("id")
+        if not container_id:
+            logger.warning(f"Instagram Reel container creation error: {create_data}")
+            return {"success": False, "error": create_data.get("error", {}).get("message", "Container error")}
+        
+        logger.info(f"Instagram Reel container created: {container_id}, waiting for processing...")
+        status_url = f"https://graph.facebook.com/v19.0/{container_id}"
+        is_ready = False
+        for _ in range(15):
+            await asyncio.sleep(3)
+            s_resp = await client.get(status_url, params={"fields": "status_code", "access_token": META_PAGE_ACCESS_TOKEN})
+            s_data = s_resp.json()
+            code = s_data.get("status_code")
+            if code == "FINISHED":
+                is_ready = True
+                break
+            elif code == "ERROR":
+                logger.warning(f"Instagram media processing error: {s_data}")
+                return {"success": False, "error": "Instagram processing failed"}
+        
+        if not is_ready:
+            logger.warning(f"Instagram media processing timed out for container: {container_id}")
+            return {"success": False, "error": "Instagram processing timeout"}
+        
+        pub_url = f"https://graph.facebook.com/v19.0/{META_IG_ACCOUNT_ID}/media_publish"
+        pub_resp = await client.post(pub_url, data={"creation_id": container_id, "access_token": META_PAGE_ACCESS_TOKEN}, timeout=30.0)
+        pub_data = pub_resp.json()
+        if pub_resp.status_code in (200, 201) and "id" in pub_data:
+            logger.info(f"Successfully published Reel to Instagram: {pub_data['id']}")
+            return {"success": True, "ig_media_id": pub_data["id"]}
+        else:
+            logger.warning(f"Instagram publish failed: {pub_data}")
+            return {"success": False, "error": pub_data.get("error", {}).get("message", "Instagram publish failed")}
+    except Exception as e:
+        logger.error(f"Error publishing to Instagram: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @api_router.post("/cf/upload")
 async def upload_cf_video(
     title: str = Form(...),
@@ -2101,6 +2199,8 @@ async def upload_cf_video(
     video: UploadFile = File(...),
     thumbnail: Optional[UploadFile] = File(None),
     aspect_ratio: str = Form('16:9'),
+    post_to_fb: bool = Form(False),
+    post_to_ig: bool = Form(False),
     _auth: dict = Depends(require_reporter_jwt),
 ):
     """
@@ -2233,12 +2333,66 @@ async def upload_cf_video(
             logger.warning(f"Push notification error: {e}")
 
     asyncio.create_task(_send_push_bg())
+
+    # ── Auto-Publish to Facebook Page & Instagram Reels in background ───────────
+    async def _send_social_bg():
+        if post_to_fb:
+            await publish_video_to_facebook(video_url, title, description)
+        if post_to_ig:
+            caption_text = f"{title}\n\n{description}\n\n#PublicSamachar #Karnataka #News #Dharwad"
+            await publish_video_to_instagram_reels(video_url, caption_text)
+
+    if post_to_fb or post_to_ig:
+        asyncio.create_task(_send_social_bg())
+
     # Invalidate feed cache so new video appears immediately
     for k in list(_mem_cache.keys()):
         if k.startswith("cf_videos_"):
             del _mem_cache[k]
 
-    return {'success': True, 'video_id': video_id, 'video_url': video_url, 'thumb_url': thumb_url}
+    return {
+        'success': True,
+        'video_id': video_id,
+        'video_url': video_url,
+        'thumb_url': thumb_url,
+        'post_to_fb': post_to_fb,
+        'post_to_ig': post_to_ig
+    }
+
+
+@api_router.get("/social/status")
+async def get_social_connection_status():
+    """Returns the live connection status of Facebook Page and Instagram."""
+    has_token = bool(META_PAGE_ACCESS_TOKEN)
+    client = get_async_client()
+    fb_info = None
+    ig_info = None
+    if has_token:
+        try:
+            r = await client.get(f"https://graph.facebook.com/v19.0/{META_FB_PAGE_ID}?fields=id,name,fan_count&access_token={META_PAGE_ACCESS_TOKEN}", timeout=5.0)
+            if r.status_code == 200:
+                fb_info = r.json()
+        except Exception:
+            pass
+        try:
+            r = await client.get(f"https://graph.facebook.com/v19.0/{META_IG_ACCOUNT_ID}?fields=id,name,username&access_token={META_PAGE_ACCESS_TOKEN}", timeout=5.0)
+            if r.status_code == 200:
+                ig_info = r.json()
+        except Exception:
+            pass
+    return {
+        "configured": has_token,
+        "facebook": {
+            "connected": fb_info is not None,
+            "page_id": META_FB_PAGE_ID,
+            "page_name": fb_info.get("name") if fb_info else "Public Samachar"
+        },
+        "instagram": {
+            "connected": ig_info is not None,
+            "account_id": META_IG_ACCOUNT_ID,
+            "username": ig_info.get("username") if ig_info else "publicsamachar._"
+        }
+    }
 
 
 @api_router.get("/cf/video-proxy/{key:path}")
