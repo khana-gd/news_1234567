@@ -151,7 +151,7 @@ R2_PUBLIC_CDN = os.environ.get(
 # ── Meta / Facebook & Instagram Integration ──────────────────────────────────
 META_PAGE_ACCESS_TOKEN = os.environ.get(
     'META_PAGE_ACCESS_TOKEN',
-    'EAAVZA8BvcnicBTKgezDZAb4SHxZAAH5hZATxpIzog0J7ZBA6sY7XPDZBDG9JKZCi91nryb3jcPS5PiBseM38pS29EcoPvUlokmUeNz6eB84yZBtVB8B2SN5Nlw3ZA0qhHZBZB7vcKBZBYDxZAEYMrZC2MUr9szfgb5SlRkcWJZA7EErQyuJsvWRxaIu1XYwirmmJgm3MapaoOTsa720RaMaHcZChHpZBPrg1oZCV8N2UtcreXoxpcFPgCCjuOn6YNq8cavvr9agmdTJrOvkwQhh6yq'
+    'EAAVZA8BvcnicBTAbYFJKL5HWtbus6r1tzGEMrKtyOTTWrtYIbvdbZAS4EBrfmHUA8YOZAn4LbvrfFvQsv1kEhrRpLoOvgHztHzfgSZAZBNroLbhH37nw7W9hT0XFrzZCahNRbCLTFsnBrcDkyyWp4A8GseQ7zZA24nlOzYNz53mci3tru3CDLFyKIrJUjJHZAOtltHRhgzoD'
 )
 META_FB_PAGE_ID = os.environ.get('META_FB_PAGE_ID', '753264744542408')
 META_IG_ACCOUNT_ID = os.environ.get('META_IG_ACCOUNT_ID', '17841475943402557')
@@ -2213,7 +2213,7 @@ async def publish_video_to_facebook(video_url: str, title: str, description: str
     client = get_async_client()
     payload = {
         "file_url": video_url,
-        "title": title[:250],
+        "title": title[:65].strip(),
         "description": f"{title}\n\n{description}".strip(),
         "access_token": META_PAGE_ACCESS_TOKEN
     }
