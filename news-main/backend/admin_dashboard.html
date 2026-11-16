@@ -202,8 +202,8 @@
         <input type="text" id="backendUrl" class="config-input" placeholder="https://..." value="https://public-samachar-api.onrender.com" onchange="saveConfig()">
       </div>
       <div class="config-field">
-        <label for="adminCode">ADMIN ACCESS CODE</label>
-        <input type="password" id="adminCode" class="config-input" style="min-width: 160px;" placeholder="Enter Admin Code" onchange="saveConfig()">
+        <label for="adminCode">ADMIN / REPORTER ACCESS CODE</label>
+        <input type="password" id="adminCode" class="config-input" style="min-width: 180px;" placeholder="PS2026 or APS2026" onchange="saveConfig()">
       </div>
       <div class="config-field">
         <label for="cleanupDays">CLEANUP THRESHOLD (DAYS)</label>
@@ -273,8 +273,8 @@
     
     // Load config from localStorage on startup
     document.addEventListener('DOMContentLoaded', () => {
-      const savedUrl = localStorage.getItem('ps_moderator_backend_url');
-      const savedCode = localStorage.getItem('ps_moderator_admin_code');
+      const savedUrl = localStorage.getItem('ps_moderator_backend_url') || localStorage.getItem('ps_backend_url');
+      const savedCode = localStorage.getItem('ps_moderator_admin_code') || localStorage.getItem('ps_reporter_code');
       
       if (savedUrl) {
         document.getElementById('backendUrl').value = savedUrl;
@@ -292,6 +292,7 @@
       
       localStorage.setItem('ps_moderator_backend_url', url);
       localStorage.setItem('ps_moderator_admin_code', code);
+      localStorage.setItem('ps_reporter_code', code);
     }
 
     function getBackendUrl() {
@@ -299,11 +300,15 @@
     }
 
     function getAuthHeaders() {
-      const code = document.getElementById('adminCode').value.trim();
-      return { 
+      const code = (document.getElementById('adminCode').value || localStorage.getItem('ps_moderator_admin_code') || localStorage.getItem('ps_reporter_code') || 'APS2026').trim();
+      const token = localStorage.getItem('ps_reporter_jwt') || '';
+      const headers = { 
         'X-Admin-Code': code,
+        'X-Reporter-Code': code,
         'Content-Type': 'application/json'
       };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      return headers;
     }
 
     function showToast(message, type = 'success') {

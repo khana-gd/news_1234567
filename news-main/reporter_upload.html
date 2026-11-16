@@ -1171,6 +1171,7 @@
 
       <!-- Quick Nav Buttons -->
       <button class="btn btn-outline btn-sm" onclick="openConfigModal()" title="API Configuration">⚙️ <span data-i18n="config">Config</span></button>
+      <a href="delete-videos" class="btn btn-outline btn-sm" title="Delete Videos Console" style="color: var(--danger); border-color: rgba(239, 68, 68, 0.4);">🗑️ <span data-i18n="deleteVideos">Delete Videos</span></a>
       <a href="admin-dashboard" class="btn btn-outline btn-sm" title="Admin Moderation Dashboard">🛡️ <span data-i18n="adminDash">Admin Panel</span></a>
     </div>
   </header>
@@ -1710,6 +1711,7 @@
       kn: {
         headerSubtitle: 'ಪಬ್ಲಿಕ್ ಸಮಾಚಾರ — ವರದಿಗಾರರ ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಪೋರ್ಟಲ್',
         config: 'ಕಾನ್ಫಿಗ್',
+        deleteVideos: 'ವಿಡಿಯೋ ಅಳಿಸಿ',
         adminDash: 'ನಿರ್ವಾಹಕರ ಪ್ಯಾನೆಲ್',
         pageHeadline: '📹 ಸುದ್ದಿ ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಸ್ಟುಡಿಯೋ',
         pageSubhead: 'ನಿಮ್ಮ ಕಂಪ್ಯೂಟರ್‌ನಿಂದ ನೇರವಾಗಿ ಹೈ-ಡೆಫಿನಿಷನ್ ಸುದ್ದಿ ವಿಡಿಯೋಗಳನ್ನು ಕ್ಲೌಡ್‌ಫ್ಲೇರ್ ಸರ್ವರ್‌ಗೆ ಪ್ರಕಟಿಸಿ',
@@ -1762,6 +1764,7 @@
       en: {
         headerSubtitle: 'Public Samachar — News Reporter Video Upload Portal',
         config: 'Config',
+        deleteVideos: 'Delete Videos',
         adminDash: 'Admin Panel',
         pageHeadline: '📹 News Video Upload Studio',
         pageSubhead: 'Publish HD breaking news videos directly from your PC to Cloudflare R2 & D1 CDN',
@@ -1965,6 +1968,8 @@
           localStorage.setItem('ps_reporter_jwt', data.token);
           localStorage.setItem('ps_reporter_name', STATE.reporterName);
           localStorage.setItem('ps_reporter_code', password);
+          localStorage.setItem('ps_moderator_admin_code', password);
+          localStorage.setItem('ps_admin_code', password);
           localStorage.setItem('ps_reporter_bureau', bureau);
 
           updateReporterUI(true);
@@ -2846,6 +2851,10 @@
                 <span>👤 ${escapeHtml(reporter)} ${location ? `· 📍 ${escapeHtml(location)}` : ''}</span>
                 <span>${timeStr}</span>
               </div>
+              <div style="margin-top: 10px; display: flex; gap: 8px;">
+                <button class="btn btn-outline btn-sm" onclick="playInFeedModal('${escapeAttr(v.video_url)}', '${escapeAttr(title)}')" style="flex:1; padding: 5px 8px; font-size: 11.5px;">▶ Play</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteFeedVideo('${escapeAttr(v.id)}', '${escapeAttr(title)}')" style="padding: 5px 10px; font-size: 11.5px; background: rgba(239,68,68,0.15); color: var(--danger); border: 1px solid rgba(239,68,68,0.3);" title="Delete video permanently">🗑️ Delete</button>
+              </div>
             </div>
           `;
           grid.appendChild(card);
@@ -2870,6 +2879,40 @@
       player.pause();
       player.src = '';
       document.getElementById('feedPlayerModal').classList.remove('active');
+    }
+
+    async function deleteFeedVideo(videoId, title) {
+      const confirmMsg = `🚨 WARNING: Are you sure you want to permanently delete this video?\n\n"${title || videoId}"\n\nThis will remove it from Cloudflare R2 storage and D1 database feed.`;
+      if (!confirm(confirmMsg)) return;
+
+      const code = (localStorage.getItem('ps_reporter_code') || localStorage.getItem('ps_moderator_admin_code') || 'PS2026').trim();
+      const token = STATE.token || localStorage.getItem('ps_reporter_jwt') || '';
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Admin-Code': code,
+        'X-Reporter-Code': code
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      showToast('Deleting video from Cloudflare...', 'info');
+
+      try {
+        const res = await fetch(`${STATE.backendUrl}/api/cf/videos/${videoId}`, {
+          method: 'DELETE',
+          headers: headers
+        });
+
+        if (res.ok) {
+          showToast('Video deleted successfully!', 'success');
+          loadRecentVideos();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast(err.detail || 'Failed to delete video. Please check your access code.', 'error');
+        }
+      } catch (err) {
+        showToast('Network error while deleting video: ' + err.message, 'error');
+      }
     }
 
     // ── Toast Notifications ───────────────────────────────────────────────────
