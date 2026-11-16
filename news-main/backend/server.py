@@ -135,7 +135,7 @@ CF_ACCOUNT_ID = os.environ.get('CF_ACCOUNT_ID', '')
 CF_API_TOKEN = os.environ.get('CF_API_TOKEN', '')
 D1_DB_ID = os.environ.get('D1_DB_ID', '')
 CF_BUCKET_NAME = 'public-samachar-videos'
-BACKEND_URL = os.environ.get('BACKEND_URL', 'https://news-react-native.preview.emergentagent.com')
+BACKEND_URL = os.environ.get('BACKEND_URL', 'https://public-samachar-api.onrender.com')
 
 # Cloudflare R2 Direct Upload (boto3 / AWS S3-compatible)
 R2_ACCESS_KEY_ID = os.environ.get('R2_ACCESS_KEY_ID', '')
@@ -2062,6 +2062,35 @@ def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int =
         return False
 
 
+def optimize_thumbnail_image(image_bytes: bytes, max_dim: int = 1280, quality: int = 82) -> bytes:
+    """
+    Optimizes a thumbnail image for social media crawlers (WhatsApp, Facebook, Twitter).
+    - Converts RGBA/P to RGB JPEG
+    - Resizes to max dimensions (1280x720)
+    - Compresses to < 200 KB (WhatsApp limit is 300 KB)
+    """
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(image_bytes))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        w, h = img.size
+        if w > max_dim or h > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+        res = out.getvalue()
+        if len(res) > 250 * 1024:
+            out2 = io.BytesIO()
+            img.save(out2, format="JPEG", quality=70, optimize=True)
+            res = out2.getvalue()
+        return res
+    except Exception as e:
+        logger.warning(f"Thumbnail optimization failed, using original bytes: {e}")
+        return image_bytes
+
+
 @api_router.post("/cf/upload")
 async def upload_cf_video(
     title: str = Form(...),
@@ -2138,12 +2167,13 @@ async def upload_cf_video(
         except Exception:
             pass
 
-    # ── Upload thumbnail (small file — read into memory is fine) ────────────
+    # ── Upload thumbnail (optimized for WhatsApp / social preview < 200KB) ────────────
     thumb_key = ''
     if thumbnail:
         thumb_data = await thumbnail.read()
+        thumb_data = optimize_thumbnail_image(thumb_data)
         thumb_key = f'news_feed/thumbs/{video_id}.jpg'
-        if not r2_upload_object(thumb_key, thumb_data, thumbnail.content_type or 'image/jpeg'):
+        if not r2_upload_object(thumb_key, thumb_data, 'image/jpeg'):
             thumb_key = ''
     elif shutil.which("ffmpeg") and final_upload_path and Path(final_upload_path).exists():
         # Auto-extract high-quality thumbnail poster frame if client didn't supply one
@@ -2158,7 +2188,7 @@ async def upload_cf_video(
             ]
             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
             if res.returncode == 0 and auto_thumb_path.exists() and auto_thumb_path.stat().st_size > 0:
-                thumb_data = auto_thumb_path.read_bytes()
+                thumb_data = optimize_thumbnail_image(auto_thumb_path.read_bytes())
                 thumb_key = f'news_feed/thumbs/{video_id}.jpg'
                 if not r2_upload_object(thumb_key, thumb_data, 'image/jpeg'):
                     thumb_key = ''
@@ -3028,7 +3058,10 @@ async def get_logo():
 
 @api_router.get("/cf/share/{video_id}", response_class=HTMLResponse)
 @api_router.get("/og/{video_id}", response_class=HTMLResponse)
-async def video_share_page(video_id: str):
+@app.get("/cf/share/{video_id}", response_class=HTMLResponse)
+@app.get("/share/{video_id}", response_class=HTMLResponse)
+@app.get("/video/{video_id}", response_class=HTMLResponse)
+async def video_share_page(video_id: str, request: Request):
     """
     Standalone web video player page — works without the app installed.
     Share URL: https://public-samachar-api.onrender.com/api/cf/share/{video_id}
@@ -3187,8 +3220,14 @@ async def video_share_page(video_id: str):
     ts          = v.get('timestamp', 0)
     caution     = v.get('caution_flag', 0)
 
-    share_url    = f"{BACKEND_URL}/api/cf/share/{video_id}"
-    download_url = f"{BACKEND_URL}/download"
+    # Dynamic live host detection
+    host = request.headers.get('x-forwarded-host') or request.headers.get('host') or 'public-samachar-api.onrender.com'
+    proto = request.headers.get('x-forwarded-proto') or 'https'
+    live_backend = f"{proto}://{host}"
+
+    share_url    = f"{live_backend}/api/cf/share/{video_id}"
+    download_url = f"{live_backend}/download"
+    logo_url     = f"{live_backend}/api/logo.png"
     _nl          = '\n'
     wa_text      = f"📺 {title}{_nl}{_nl}🔗 Watch here: {share_url}{_nl}{_nl}📲 Download Public Samachar App: {download_url}"
     wa_encoded   = wa_text.replace(' ', '%20').replace('\n', '%0A')
@@ -3207,10 +3246,26 @@ async def video_share_page(video_id: str):
     share_url_e   = _E(share_url)
     wa_url_e      = _E(wa_url)
     download_url_e = _E(download_url)
-    logo_url      = "/api/logo.png"
     logo_url_e    = _E(logo_url)
 
-    thumb_meta  = f'<meta property="og:image" content="{thumb_url_e}">' if thumb_url else ''
+    # Clean description snippet for meta tags (no raw newlines)
+    clean_desc = (description or '').replace('\r', ' ').replace('\n', ' ').strip()
+    if clean_desc:
+        meta_desc = (clean_desc[:180] + '...') if len(clean_desc) > 180 else clean_desc
+    else:
+        meta_desc = f"Reported by {reporter}{(' · ' + location) if location else ''}"
+    meta_desc_e = _E(meta_desc)
+
+    og_image_tags = ""
+    if thumb_url:
+        og_image_tags = f"""  <meta property="og:image"            content="{thumb_url_e}">
+  <meta property="og:image:secure_url" content="{thumb_url_e}">
+  <meta property="og:image:type"       content="image/jpeg">
+  <meta property="og:image:width"      content="1280">
+  <meta property="og:image:height"     content="720">
+  <meta property="og:image:alt"        content="{title_e}">
+  <meta name="twitter:image"           content="{thumb_url_e}">"""
+
     caution_bar = '''<div class="caution-bar">⚠️ This content has not been independently verified</div>''' if caution else ''
     location_html = f'<span class="location">📍 {location_e}</span>' if location else ''
     desc_html   = f'<p class="desc">{description_e}</p>' if description else ''
@@ -3264,17 +3319,22 @@ async def video_share_page(video_id: str):
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>{title_e} — Public Samachar</title>
+  <link rel="icon" type="image/png" href="{logo_url_e}">
+  <link rel="apple-touch-icon" href="{logo_url_e}">
   {preconnect_html}
-  <meta name="description" content="{description_e or title_e}">
-  <!-- Open Graph / WhatsApp preview -->
-  <meta property="og:type"        content="video.other">
-  <meta property="og:title"       content="{title_e}">
-  <meta property="og:description" content="Reported by {reporter_e}{(' · ' + location_e) if location else ''}">
-  <meta property="og:url"         content="{share_url_e}">
-  {thumb_meta}
-  <meta property="og:video"       content="{video_url_e}">
-  <meta property="og:video:type"  content="video/mp4">
-  <meta name="twitter:card"       content="summary_large_image">
+  <meta name="description" content="{meta_desc_e}">
+  <!-- Open Graph / WhatsApp / Facebook / Telegram preview -->
+  <meta property="og:site_name"        content="Public Samachar">
+  <meta property="og:type"             content="article">
+  <meta property="og:title"            content="{title_e}">
+  <meta property="og:description"      content="{meta_desc_e}">
+  <meta property="og:url"              content="{share_url_e}">
+{og_image_tags}
+  <meta property="og:video"            content="{video_url_e}">
+  <meta property="og:video:type"       content="video/mp4">
+  <meta name="twitter:card"            content="summary_large_image">
+  <meta name="twitter:title"           content="{title_e}">
+  <meta name="twitter:description"      content="{meta_desc_e}">
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
@@ -3472,7 +3532,6 @@ async def video_share_page(video_id: str):
     <!-- Video Player -->
     <div class="video-wrap">
       {player_html}
-      <img src="{logo_url_e}" class="video-logo" alt="Public Samachar Logo">
       <!-- Error fallback -->
       <div class="video-error" id="vid-error">
         <div class="err-icon">📺</div>

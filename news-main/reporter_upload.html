@@ -2366,10 +2366,17 @@
       }
 
       const canvas = document.getElementById('frameCaptureCanvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      let w = video.videoWidth;
+      let h = video.videoHeight;
+      if (w > 1280 || h > 720) {
+        const scale = Math.min(1280 / w, 720 / h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, w, h);
 
       canvas.toBlob((blob) => {
         if (!blob) {
@@ -2383,7 +2390,7 @@
         img.style.display = 'block';
         document.getElementById('noThumbTxt').style.display = 'none';
         if (!silent) showToast('Snapshot frame captured as thumbnail!', 'success');
-      }, 'image/jpeg', 0.9);
+      }, 'image/jpeg', 0.82);
     }
 
     function handleCustomThumbSelected(file) {
@@ -2518,11 +2525,18 @@
           const video = document.getElementById('previewVideoPlayer');
           if (video && video.videoWidth && video.videoHeight) {
             const canvas = document.getElementById('frameCaptureCanvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+            let w = video.videoWidth;
+            let h = video.videoHeight;
+            if (w > 1280 || h > 720) {
+              const scale = Math.min(1280 / w, 720 / h);
+              w = Math.round(w * scale);
+              h = Math.round(h * scale);
+            }
+            canvas.width = w;
+            canvas.height = h;
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const autoBlob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.88));
+            ctx.drawImage(video, 0, 0, w, h);
+            const autoBlob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.82));
             if (autoBlob) {
               STATE.customThumbBlob = autoBlob;
             }
