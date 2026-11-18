@@ -196,10 +196,12 @@ def enforce_rate_limit(request: Request, scope: str, max_requests: int, window_s
 
 # ── Auth dependencies ─────────────────────────────────────────────────────────
 def is_valid_admin_or_reporter_code(code: str) -> bool:
-    """Verify if a code matches admin or reporter access codes (case-insensitive, trimmed)."""
+    """Verify if a code matches admin or reporter access codes (case-insensitive, trimmed, Bearer-tolerant)."""
     if not code:
         return False
     code_clean = str(code).strip()
+    if code_clean.lower().startswith("bearer "):
+        code_clean = code_clean[7:].strip()
     if not code_clean:
         return False
     # Check against ADMIN_ACCESS_CODE env var
