@@ -2572,14 +2572,15 @@ async def save_cf_profile(request: Request):
     return {'success': True, 'id': profile_id}
 
 
-APK_R2_CDN_URL = "https://pub-053fe10649264831be10ca4454fe912c.r2.dev/apk/public-samachar-v18.apk"
-APK_SIZE_BYTES  = 130709409  # 125 MB
+APK_R2_CDN_URL = "https://pub-053fe10649264831be10ca4454fe912c.r2.dev/apk/public-samachar-latest.apk"
+APK_FALLBACK_URL = "https://pub-053fe10649264831be10ca4454fe912c.r2.dev/apk/public-samachar-v18.apk"
+APK_SIZE_BYTES  = 130709409  # 124.65 MB
 
 
 @api_router.api_route("/download/apk", methods=["GET", "HEAD"])
 async def download_apk(request: Request):
     """
-    Redirect to the APK directly on Cloudflare R2 CDN (no proxy size limits).
+    Redirect to the APK directly on Cloudflare R2 CDN (high-speed, no proxy size limits).
     """
     from fastapi.responses import RedirectResponse, Response
 
@@ -2590,7 +2591,7 @@ async def download_apk(request: Request):
                 "Content-Length":      str(APK_SIZE_BYTES),
                 "Content-Type":        "application/vnd.android.package-archive",
                 "Accept-Ranges":       "bytes",
-                "Content-Disposition": 'attachment; filename="PublicSamachar-v18.apk"',
+                "Content-Disposition": 'attachment; filename="PublicSamachar-Latest.apk"',
                 "Cache-Control":       "no-cache",
             },
         )
@@ -2602,94 +2603,135 @@ async def download_apk(request: Request):
 @api_router.get("/download/page", response_class=HTMLResponse)
 async def download_page(request: Request):
     """
-    A proper download landing page — triggers the APK download correctly on Android.
+    High-conversion mobile download landing page — auto-triggers the APK download on Android.
     """
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="kn">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Download Public Samachar</title>
+<title>Download Public Samachar App</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #E6F7F3;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0E1626;
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 20px;
+    padding: 16px;
+    color: #fff;
   }}
   .card {{
-    background: #fff;
-    border-radius: 20px;
-    padding: 36px 28px;
-    max-width: 400px;
+    background: #151F32;
+    border: 1px solid rgba(26,170,148,0.3);
+    border-radius: 24px;
+    padding: 32px 24px;
+    max-width: 420px;
     width: 100%;
     text-align: center;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.10);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
   }}
-  .logo {{ font-size: 48px; margin-bottom: 12px; }}
-  h1 {{ font-size: 24px; color: #1a1a2e; margin-bottom: 6px; }}
-  .sub {{ color: #666; font-size: 14px; margin-bottom: 28px; }}
+  .logo {{
+    width: 72px; height: 72px; border-radius: 20px;
+    background: linear-gradient(135deg, #1AAA94, #0D8975);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px; margin: 0 auto 16px;
+    box-shadow: 0 8px 20px rgba(26,170,148,0.35);
+  }}
+  h1 {{ font-size: 22px; color: #fff; font-weight: 800; margin-bottom: 6px; }}
+  .sub {{ color: #94A3B8; font-size: 13.5px; margin-bottom: 24px; }}
   .btn {{
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
     background: linear-gradient(135deg, #1AAA94, #0D8975);
     color: #fff;
     text-decoration: none;
-    padding: 16px 24px;
+    padding: 16px 20px;
     border-radius: 14px;
-    font-size: 17px;
-    font-weight: 700;
-    margin-bottom: 14px;
-    letter-spacing: 0.3px;
+    font-size: 16px;
+    font-weight: 800;
+    margin-bottom: 12px;
+    box-shadow: 0 6px 18px rgba(26,170,148,0.35);
+    transition: transform 0.15s ease;
   }}
-  .btn:active {{ opacity: 0.9; }}
-  .size {{ color: #999; font-size: 13px; margin-bottom: 24px; }}
+  .btn:active {{ transform: scale(0.98); }}
+  .btn-alt {{
+    display: block;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #CBD5E1;
+    text-decoration: none;
+    padding: 11px 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 20px;
+  }}
+  .size {{ color: #10B981; font-size: 12.5px; font-weight: 700; margin-bottom: 20px; }}
   .tips {{
-    background: #FFFFFF;
-    border: 1px solid #B2E5DC;
-    border-radius: 12px;
+    background: rgba(26,170,148,0.08);
+    border: 1px solid rgba(26,170,148,0.22);
+    border-radius: 14px;
     padding: 16px;
     text-align: left;
+    margin-bottom: 16px;
   }}
-  .tips h3 {{ font-size: 13px; color: #444; margin-bottom: 10px; font-weight: 700; }}
+  .tips h3 {{ font-size: 12.5px; color: #1AAA94; margin-bottom: 8px; font-weight: 700; }}
   .tips li {{
-    font-size: 13px;
-    color: #555;
+    font-size: 12.5px;
+    color: #CBD5E1;
     margin-bottom: 6px;
-    margin-left: 16px;
+    margin-left: 18px;
+    line-height: 1.4;
   }}
-  .version {{ margin-top: 20px; font-size: 12px; color: #bbb; }}
+  .auto-txt {{ font-size: 11.5px; color: #64748B; margin-top: 10px; }}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">📺</div>
-  <h1>Public Samachar</h1>
-  <p class="sub">Your local video news app</p>
+  <h1>ಪಬ್ಲಿಕ್ ಸಮಾಚಾರ ಆ್ಯಪ್</h1>
+  <p class="sub">Public Samachar — ಸ್ಥಳೀಯ ವಿಡಿಯೋ ಸುದ್ದಿ ಆ್ಯಪ್</p>
 
-  <a class="btn" href="{APK_R2_CDN_URL}" download="PublicSamachar-v18.apk">
-    ⬇️ Download APK (125 MB)
+  <a class="btn" id="dlBtn" href="{APK_R2_CDN_URL}" download="PublicSamachar-Latest.apk">
+    ⬇️ ಡೌನ್‌ಲೋಡ್ APK (125 MB)
   </a>
-  <p class="size">Version 18 &nbsp;·&nbsp; Android 6.0+ &nbsp;·&nbsp; Cloudflare CDN</p>
+  <p class="size">✓ Verified Safe &nbsp;·&nbsp; Cloudflare High-Speed CDN</p>
+
+  <a class="btn-alt" href="{APK_FALLBACK_URL}" download="PublicSamachar-v18.apk">
+    🔄 ಪರ್ಯಾಯ ಲಿಂಕ್ (Mirror 2)
+  </a>
 
   <div class="tips">
-    <h3>📋 Installation Tips:</h3>
+    <h3>📋 ಇನ್‌ಸ್ಟಾಲ್ ಮಾಡುವ ವಿಧಾನ (How to Install):</h3>
     <ul>
-      <li>Keep screen ON during download</li>
-      <li>Use Wi-Fi for best speed</li>
-      <li>If download pauses — tap <b>Resume</b></li>
-      <li>After download, tap to install</li>
-      <li>Enable <b>Install unknown apps</b> if asked</li>
+      <li>ಡೌನ್‌ಲೋಡ್ ಆದ ನಂತರ <b>Open</b> ಕ್ಲಿಕ್ ಮಾಡಿ</li>
+      <li><b>Install unknown apps</b> ಕೇಳಿದರೆ <b>Allow</b> ಮಾಡಿ</li>
+      <li><b>Install anyway</b> ಆಯ್ಕೆ ಮಾಡಿ ಆ್ಯಪ್ ತೆರೆಯಿರಿ</li>
     </ul>
   </div>
 
-  <p class="version">Public Samachar v18 · Crash-free Direct Upload</p>
+  <p class="auto-txt">ಡೌನ್‌ಲೋಡ್ ತಾನಾಗಿಯೇ ಪ್ರಾರಂಭವಾಗದಿದ್ದರೆ ಮೇಲಿನ ಹಸಿರು ಬಟನ್ ಒತ್ತಿ.</p>
 </div>
+
+<script>
+  // Automatic download trigger for mobile users after short delay
+  setTimeout(function() {{
+    var link = document.createElement('a');
+    link.href = "{APK_R2_CDN_URL}";
+    link.download = "PublicSamachar-Latest.apk";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }}, 900);
+</script>
 </body>
 </html>"""
+    return HTMLResponse(content=html)
     return HTMLResponse(content=html)
 
 
