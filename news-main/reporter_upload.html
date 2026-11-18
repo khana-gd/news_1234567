@@ -1276,64 +1276,17 @@
             <button class="btn btn-outline btn-sm" onclick="clearSelectedVideo(event)" title="Remove and choose another video">✕ ಬದಲಾಯಿಸಿ</button>
           </div>
 
-          <!-- Video Compression & Optimizer Panel -->
-          <div id="compressionPanel" style="display: none; background: rgba(14, 22, 38, 0.7); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 18px; margin-top: 12px; flex-direction: column; gap: 12px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-              <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 22px;">⚡</span>
-                <div>
-                  <div style="font-size: 13.5px; font-weight: 700; color: #fff;" data-i18n="lblCompressTitle">ವಿಡಿಯೋ ಸಂಕೋಚನ (Video Compression)</div>
-                  <div style="font-size: 11px; color: var(--text-muted);" data-i18n="lblCompressDesc">ಅಪ್ಲೋಡ್ ವೇಗ ಹೆಚ್ಚಿಸಲು & ಮೊಬೈಲ್ ಡೇಟಾ ಉಳಿಸಲು ವಿಡಿಯೋ ಸೈಜ್ ಕಡಿಮೆ ಮಾಡಿ</div>
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);" id="compressToggleLabel" data-i18n="lblCompressToggle">ಸ್ವಯಂಚಾಲಿತ ಸಂಕೋಚನ (ಆಫ್)</span>
-                <label class="switch">
-                  <input type="checkbox" id="compressToggle" onchange="handleCompressToggleChange()">
-                  <span class="slider"></span>
-                </label>
+          <!-- Video Cloudflare FastStream Server Optimizer Banner -->
+          <div id="compressionPanel" style="display: none; background: rgba(14, 22, 38, 0.7); border: 1px solid rgba(26, 170, 148, 0.35); border-radius: var(--radius-md); padding: 12px 16px; margin-top: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 20px;">🚀</span>
+              <div>
+                <div style="font-size: 13px; font-weight: 700; color: #fff;">ಕ್ಲೌಡ್‌ಫ್ಲೇರ್ ಫಾಸ್ಟ್‌ಸ್ಟ್ರೀಮ್ ಆಪ್ಟಿಮೈಸರ್ (Cloudflare FastStream)</div>
+                <div style="font-size: 11px; color: var(--text-muted);">ವಿಡಿಯೋ ಸ್ವಯಂಚಾಲಿತವಾಗಿ 30fps CFR + ಫಾಸ್ಟ್‌ಸ್ಟಾರ್ಟ್ ಆಗಿ ಪರಿವರ್ತನೆಯಾಗುತ್ತದೆ. ಮೊಬೈಲ್‌ನಲ್ಲಿ ಬಫರಿಂಗ್ ಮುಕ್ತ ಪ್ಲೇಬ್ಯಾಕ್!</div>
               </div>
             </div>
-
-            <div id="compressionControls" style="display: none; flex-direction: column; gap: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <label style="font-size: 12px; color: var(--text-muted); font-weight: 600;" data-i18n="lblCompressQuality">ಗುಣಮಟ್ಟ / ರೆಸಲ್ಯೂಶನ್:</label>
-                  <select id="compressQualitySelect" class="form-input" style="padding: 6px 10px; font-size: 12px; width: auto; min-width: 200px; height: auto;">
-                    <option value="720p" selected>📱 720p HD — ಮೊಬೈಲ್ ಅತ್ಯುತ್ತಮ (~1.8 Mbps)</option>
-                    <option value="480p">⚡ 480p SD — ಅತಿ ವೇಗದ ಅಪ್ಲೋಡ್ (~950 kbps)</option>
-                    <option value="1080p">🎬 1080p Full HD — ಗರಿಷ್ಠ ಸ್ಪಷ್ಟತೆ (~3.2 Mbps)</option>
-                  </select>
-                </div>
-
-                <button type="button" class="btn btn-outline btn-sm" id="btnRunCompression" onclick="compressSelectedVideoManual()" style="border-color: var(--primary); color: var(--primary-light);">
-                  ⚡ ಈಗಲೇ ಕಂಪ್ರೆಸ್ ಮಾಡಿ (Compress Now)
-                </button>
-              </div>
-
-              <!-- Compression Result / Status Banner -->
-              <div id="compressStatusBox" style="display: none; background: rgba(26, 170, 148, 0.08); border: 1px solid rgba(26, 170, 148, 0.25); border-radius: 8px; padding: 10px 14px; font-size: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span id="compressStatusIcon">🔄</span>
-                  <span id="compressStatusText" style="color: #fff; font-weight: 600;">ಸಂಕೋಚನ ಪ್ರಕ್ರಿಯೆ...</span>
-                </div>
-                <div id="compressSizeDiff" style="display: flex; align-items: center; gap: 8px;">
-                  <span style="color: var(--text-muted); text-decoration: line-through;" id="origSizeTxt">0 MB</span>
-                  <span style="color: #10B981; font-weight: 700;" id="compSizeTxt">0 MB</span>
-                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid #10B981;" id="compSavingsBadge">-0%</span>
-                </div>
-              </div>
-
-              <!-- Progress bar for compression -->
-              <div id="compressProgressBarWrap" style="display: none; flex-direction: column; gap: 4px;">
-                <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted);">
-                  <span id="compressProgressStage" data-i18n="lblCompressProgress">ಫ್ರೇಮ್‌ಗಳನ್ನು ಪ್ರಕ್ರಿಯೆಗೊಳಿಸಲಾಗುತ್ತಿದೆ...</span>
-                  <span id="compressProgressPct">0%</span>
-                </div>
-                <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
-                  <div id="compressProgressFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent-cyan)); transition: width 0.15s ease;"></div>
-                </div>
-              </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid #10B981; padding: 4px 8px; font-size: 11px; font-weight: 700;">✓ ಸಕ್ರಿಯ (Active)</span>
             </div>
           </div>
         </div>
@@ -1630,20 +1583,43 @@
 
   <!-- ── SUCCESS CELEBRATION MODAL ── -->
   <div class="modal-overlay" id="successModal">
-    <div class="modal-card">
+    <div class="modal-card" style="max-width: 540px;">
       <div class="modal-icon-success">✓</div>
       <h3 data-i18n="successTitle">ಸುದ್ದಿ ಯಶಸ್ವಿಯಾಗಿ ಪ್ರಕಟವಾಗಿದೆ!</h3>
-      <p data-i18n="successDesc">ನಿಮ್ಮ ವಿಡಿಯೋ ಪೋಸ್ಟ್ ಕ್ಲೌಡ್‌ಫ್ಲೇರ್ ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ಯಶಸ್ವಿಯಾಗಿ ಪ್ರಸಾರವಾಗಿದ್ದು, ಓದುಗರಿಗೆ ಲಭ್ಯವಿದೆ.</p>
+      <p data-i18n="successDesc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">ನಿಮ್ಮ ವಿಡಿಯೋ ಪೋಸ್ಟ್ ಕ್ಲೌಡ್‌ಫ್ಲೇರ್ ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ಯಶಸ್ವಿಯಾಗಿ ಪ್ರಸಾರವಾಗಿದ್ದು, ಆ್ಯಪ್ ಮತ್ತು ವೆಬ್‌ಸೈಟ್‌ನಲ್ಲಿ ಓದುಗರಿಗೆ ಲಭ್ಯವಿದೆ.</p>
 
-      <div class="share-link-box">
+      <div class="share-link-box" style="margin-bottom: 16px;">
         <input type="text" id="successCdnUrlInput" readonly>
         <button class="btn btn-primary btn-sm" onclick="copyCdnUrl()">📋 Copy</button>
       </div>
 
+      <!-- 1-Click Direct Social Sharing -->
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px; margin-bottom: 16px; text-align: left;">
+        <div style="font-size: 12px; font-weight: 700; color: #fff; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+          <span>📲 ನೇರ ಸೋಶಿಯಲ್ ಮೀಡಿಯಾ ಹಂಚಿಕೆ (1-Click Direct Share):</span>
+          <span style="font-size: 10.5px; color: #10B981; font-weight: 600;">● ಲೈವ್ ಆಗಿದೆ</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <button type="button" class="btn btn-sm" onclick="shareToInstagram()" style="background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); color: #fff; font-weight: 700; justify-content: center; gap: 6px; padding: 10px;">
+            <span>📸</span> Instagram Reels
+          </button>
+          <button type="button" class="btn btn-sm" onclick="shareToFacebook()" style="background: #1877F2; color: #fff; font-weight: 700; justify-content: center; gap: 6px; padding: 10px;">
+            <span>📘</span> Facebook Page
+          </button>
+          <button type="button" class="btn btn-sm" onclick="shareToWhatsApp()" style="background: #25D366; color: #fff; font-weight: 700; justify-content: center; gap: 6px; padding: 10px;">
+            <span>💬</span> WhatsApp Channel
+          </button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="openPublishedVideo()" style="justify-content: center; gap: 6px; padding: 10px;">
+            <span>▶️</span> ವಿಡಿಯೋ ವೀಕ್ಷಿಸಿ
+          </button>
+        </div>
+        <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted); line-height: 1.4; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px;">
+          💡 <strong>ಸಲಹೆ</strong>: 'Instagram Reels' ಕ್ಲಿಕ್ ಮಾಡಿದಾಗ ಶೀರ್ಷಿಕೆ ಮತ್ತು ಹ್ಯಾಶ್‌ಟ್ಯಾಗ್ ಸ್ವಯಂಚಾಲಿತವಾಗಿ ಕಾಪಿ ಆಗುತ್ತದೆ!
+        </div>
+      </div>
+
       <div class="modal-btn-row">
-        <button class="btn btn-secondary" onclick="shareToWhatsApp()">💬 WhatsApp ಹಂಚಿಕೊಳ್ಳಿ</button>
-        <button class="btn btn-outline" onclick="openPublishedVideo()">▶️ ವಿಡಿಯೋ ವೀಕ್ಷಿಸಿ</button>
-        <button class="btn btn-primary" onclick="resetUploadFormAndClose()">+ ಮತ್ತೊಂದು ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಮಾಡಿ</button>
+        <button class="btn btn-primary" onclick="resetUploadFormAndClose()" style="width: 100%;">+ ಮತ್ತೊಂದು ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಮಾಡಿ (Upload Next)</button>
       </div>
     </div>
   </div>
@@ -2166,294 +2142,16 @@
       document.getElementById('btnCaptureFrame').disabled = true;
     }
 
-    // ── VIDEO COMPRESSION ENGINE (Client-Side HTML5 Transcoder) ───────────────
-    function handleCompressToggleChange() {
-      const isChecked = document.getElementById('compressToggle').checked;
-      document.getElementById('compressionControls').style.display = isChecked ? 'flex' : 'none';
-      const label = document.getElementById('compressToggleLabel');
-      if (isChecked) {
-        label.textContent = STATE.lang === 'kn' ? 'ಸ್ವಯಂಚಾಲಿತ ಸಂಕೋಚನ ಸಕ್ರಿಯ' : 'Auto-Compress Enabled';
-        label.style.color = 'var(--primary-light)';
-      } else {
-        label.textContent = STATE.lang === 'kn' ? 'ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ' : 'Disabled (Upload Original)';
-        label.style.color = 'var(--text-muted)';
-      }
-    }
+    // ── SERVER-SIDE FASTSTREAM OPTIMIZATION ──────────────────────────────────
+    // Direct stream to server — server FFmpeg transcode guarantees 30fps CFR,
+    // audio-video duration sync, and sub-100ms FastStart playback on mobile.
+    function handleCompressToggleChange() {}
+    async function compressSelectedVideoManual() {}
 
-    async function compressSelectedVideoManual() {
-      if (!STATE.selectedFile) {
-        showToast('Please select a video file first', 'error');
-        return;
-      }
-      const quality = document.getElementById('compressQualitySelect').value;
-      const btn = document.getElementById('btnRunCompression');
-      btn.disabled = true;
-      btn.textContent = STATE.lang === 'kn' ? 'ಸಂಕೋಚನವಾಗುತ್ತಿದೆ...' : 'Compressing...';
-
-      const statusBox = document.getElementById('compressStatusBox');
-      const progressWrap = document.getElementById('compressProgressBarWrap');
-      const progressFill = document.getElementById('compressProgressFill');
-      const progressPct = document.getElementById('compressProgressPct');
-      const statusTxt = document.getElementById('compressStatusText');
-      const statusIcon = document.getElementById('compressStatusIcon');
-
-      statusBox.style.display = 'flex';
-      progressWrap.style.display = 'flex';
-      statusIcon.textContent = '🔄';
-      statusTxt.textContent = STATE.lang === 'kn' ? 'ವಿಡಿಯೋ ಸಂಕೋಚನ ಪ್ರಕ್ರಿಯೆ ನಡೆಯುತ್ತಿದೆ...' : 'Compressing video frames...';
-
-      try {
-        const compressedFile = await compressVideoFile(STATE.selectedFile, {
-          targetResolution: quality,
-          onProgress: (pct) => {
-            progressFill.style.width = `${pct}%`;
-            progressPct.textContent = `${pct}%`;
-          }
-        });
-
-        STATE.compressedFile = compressedFile;
-
-        if (STATE.compressedBlobUrl) URL.revokeObjectURL(STATE.compressedBlobUrl);
-        STATE.compressedBlobUrl = URL.createObjectURL(compressedFile);
-
-        const player = document.getElementById('previewVideoPlayer');
-        player.src = STATE.compressedBlobUrl;
-
-        const origMb = (STATE.selectedFile.size / (1024 * 1024)).toFixed(1);
-        const compMb = (compressedFile.size / (1024 * 1024)).toFixed(1);
-        const savedPct = Math.round(((STATE.selectedFile.size - compressedFile.size) / STATE.selectedFile.size) * 100);
-
-        statusIcon.textContent = '✅';
-        statusTxt.textContent = STATE.lang === 'kn' ? 'ವಿಡಿಯೋ ಯಶಸ್ವಿಯಾಗಿ ಸಂಕೋಚನಗೊಂಡಿದೆ!' : 'Video successfully compressed!';
-        document.getElementById('origSizeTxt').textContent = `${origMb} MB`;
-        document.getElementById('compSizeTxt').textContent = `${compMb} MB`;
-        document.getElementById('compSavingsBadge').textContent = `-${Math.max(0, savedPct)}%`;
-
-        document.getElementById('statFileSize').textContent = `${compMb} MB (Compressed)`;
-        document.getElementById('selectedFileMeta').textContent = `${compMb} MB · ಸಂಕೋಚಿತ`;
-
-        progressWrap.style.display = 'none';
-        btn.disabled = false;
-        btn.textContent = STATE.lang === 'kn' ? '✓ ಕಂಪ್ರೆಸ್ ಆಗಿದೆ (Re-compress)' : '✓ Compressed (Re-compress)';
-        showToast(STATE.lang === 'kn' ? `ವಿಡಿಯೋ ಸೈಜ್ ${origMb}MB ನಿಂದ ${compMb}MB ಗೆ ಇಳಿಕೆಯಾಗಿದೆ!` : `Video reduced from ${origMb}MB to ${compMb}MB!`, 'success');
-      } catch (err) {
-        console.error('Compression error:', err);
-        statusIcon.textContent = '⚠️';
-        statusTxt.textContent = STATE.lang === 'kn' ? 'ಕ್ಲೈಂಟ್ ಸಂಕೋಚನ ವಿಫಲವಾಗಿದೆ, ಸರ್ವರ್ ಆಪ್ಟಿಮೈಸ್ ಮಾಡುತ್ತದೆ.' : 'Client compression skipped, server will optimize.';
-        progressWrap.style.display = 'none';
-        btn.disabled = false;
-        btn.textContent = STATE.lang === 'kn' ? '⚡ ಪುನಃ ಪ್ರಯತ್ನಿಸಿ' : '⚡ Retry Compression';
-        showToast('Client compression skipped. Server will optimize video.', 'warning');
-      }
-    }
 
     async function compressVideoFile(file, options = {}) {
-      const {
-        targetResolution = '720p',
-        onProgress = () => {},
-      } = options;
-
-      return new Promise((resolve, reject) => {
-        let isDone = false;
-        let animId = null;
-        let audioCtx = null;
-        let combinedStream = null;
-        let timeoutTimer = null;
-
-        const video = document.createElement('video');
-        video.muted = false; // Must be false so AudioContext receives the live audio track
-        video.volume = 1.0;
-        video.playsInline = true;
-        video.preload = 'auto';
-
-        const fileUrl = URL.createObjectURL(file);
-        video.src = fileUrl;
-
-        const cleanup = () => {
-          if (animId) cancelAnimationFrame(animId);
-          if (timeoutTimer) clearTimeout(timeoutTimer);
-          try { URL.revokeObjectURL(fileUrl); } catch (e) {}
-          if (audioCtx && audioCtx.state !== 'closed') {
-            audioCtx.close().catch(() => {});
-          }
-          if (combinedStream) {
-            combinedStream.getTracks().forEach(t => {
-              try { t.stop(); } catch (e) {}
-            });
-          }
-        };
-
-        video.onerror = (e) => {
-          cleanup();
-          reject(new Error('Video loading error during compression'));
-        };
-
-        video.onloadedmetadata = async () => {
-          try {
-            const origW = video.videoWidth || 1280;
-            const origH = video.videoHeight || 720;
-            const duration = video.duration || 1;
-            const isPortrait = origH > origW;
-
-            let maxDim = 1280;
-            let bitrate = 1800000; // 1.8 Mbps
-
-            if (targetResolution === '480p') {
-              maxDim = 854;
-              bitrate = 950000;
-            } else if (targetResolution === '1080p') {
-              maxDim = 1920;
-              bitrate = 3200000;
-            }
-
-            let w = origW;
-            let h = origH;
-
-            if (isPortrait) {
-              if (origH > maxDim) {
-                h = maxDim;
-                w = Math.round((origW / origH) * maxDim);
-              }
-            } else {
-              if (origW > maxDim) {
-                w = maxDim;
-                h = Math.round((origH / origW) * maxDim);
-              }
-            }
-
-            // Codecs require even dimensions
-            w = w - (w % 2);
-            h = h - (h % 2);
-
-            const canvas = document.createElement('canvas');
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d', { alpha: false });
-
-            // Stream capture
-            const canvasStream = canvas.captureStream(30);
-            combinedStream = new MediaStream();
-            canvasStream.getVideoTracks().forEach(t => combinedStream.addTrack(t));
-
-            // Audio track routing
-            try {
-              const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-              if (AudioContextClass) {
-                audioCtx = new AudioContextClass();
-                if (audioCtx.state === 'suspended') {
-                  await audioCtx.resume().catch(() => {});
-                }
-                const source = audioCtx.createMediaElementSource(video);
-                const dest = audioCtx.createMediaStreamDestination();
-                source.connect(dest);
-                // dest streams audio directly to recorder; user's speakers remain silent
-                dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
-              }
-            } catch (aErr) {
-              console.warn('Audio capture note:', aErr);
-            }
-
-            // Find best supported format
-            const possibleTypes = [
-              'video/mp4;codecs=avc1,mp4a.40.2',
-              'video/mp4',
-              'video/webm;codecs=vp8,opus',
-              'video/webm;codecs=vp9,opus',
-              'video/webm'
-            ];
-            let selectedMime = '';
-            for (const t of possibleTypes) {
-              if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) {
-                selectedMime = t;
-                break;
-              }
-            }
-
-            if (!selectedMime) {
-              cleanup();
-              return resolve(file); // Browser doesn't support recorder, fallback to original
-            }
-
-            const recorder = new MediaRecorder(combinedStream, {
-              mimeType: selectedMime,
-              videoBitsPerSecond: bitrate
-            });
-
-            const chunks = [];
-            recorder.ondataavailable = (e) => {
-              if (e.data && e.data.size > 0) chunks.push(e.data);
-            };
-
-            const finishEncoding = () => {
-              if (isDone) return;
-              isDone = true;
-              onProgress(100);
-              try {
-                if (recorder.state !== 'inactive') {
-                  recorder.stop();
-                }
-              } catch (e) {}
-            };
-
-            recorder.onstop = () => {
-              cleanup();
-              const ext = selectedMime.includes('mp4') ? 'mp4' : 'webm';
-              const compressedBlob = new Blob(chunks, { type: selectedMime });
-              const cleanBase = file.name.replace(/\.[^/.]+$/, '');
-              const compressedFile = new File(
-                [compressedBlob],
-                `${cleanBase}_compressed.${ext}`,
-                { type: selectedMime, lastModified: Date.now() }
-              );
-              resolve(compressedFile);
-            };
-
-            recorder.onerror = (e) => {
-              cleanup();
-              reject(e);
-            };
-
-            // Start recording
-            recorder.start(200);
-
-            const drawLoop = () => {
-              if (isDone) return;
-              if (!video.paused && !video.ended) {
-                ctx.drawImage(video, 0, 0, w, h);
-                const pct = Math.min(99, Math.round((video.currentTime / duration) * 100));
-                onProgress(pct);
-              }
-              if (video.ended || video.currentTime >= duration) {
-                finishEncoding();
-                return;
-              }
-              animId = requestAnimationFrame(drawLoop);
-            };
-
-            video.onended = () => finishEncoding();
-
-            // Safety timeout
-            timeoutTimer = setTimeout(() => {
-              if (!isDone) finishEncoding();
-            }, Math.max(15000, (duration * 1000) + 10000));
-
-            // Real-time playback to ensure audio frames align accurately
-            video.playbackRate = 1.0;
-            try {
-              await video.play();
-            } catch (playErr) {
-              console.warn('Playback error during compression, fallback to original:', playErr);
-              cleanup();
-              return resolve(file);
-            }
-            animId = requestAnimationFrame(drawLoop);
-
-          } catch (initErr) {
-            cleanup();
-            reject(initErr);
-          }
-        };
-      });
+      // Server-side FFmpeg automatically handles 30fps CFR, FastStart, and sync
+      return Promise.resolve(file);
     }
 
     // ── Frame Grabber (Capture Video Frame as Thumbnail) ───────────────────────
@@ -2586,39 +2284,15 @@
       const publishBtn = document.getElementById('publishBtn');
       publishBtn.disabled = true;
 
-      // Check if compression is enabled and video not already compressed
-      let fileToUpload = STATE.compressedFile || STATE.selectedFile;
-      const isAutoCompress = document.getElementById('compressToggle').checked;
+      // Direct fast upload: server FFmpeg automatically normalizes to 30fps CFR, FastStart & audio sync
+      const fileToUpload = STATE.selectedFile;
 
-      if (!STATE.compressedFile && isAutoCompress) {
-        publishBtn.textContent = STATE.lang === 'kn' ? '⚡ 1/2: ವಿಡಿಯೋ ಸಂಕೋಚನ...' : '⚡ 1/2: Compressing Video...';
-        const progressBox = document.getElementById('uploadProgressBox');
-        progressBox.style.display = 'flex';
-        setProgress(5, STATE.lang === 'kn' ? '1. ವಿಡಿಯೋ ಸಂಕೋಚನ ಪ್ರಕ್ರಿಯೆ...' : '1. Compressing video before upload...');
-        setStepActive('step1');
-
-        try {
-          const quality = document.getElementById('compressQualitySelect').value;
-          fileToUpload = await compressVideoFile(STATE.selectedFile, {
-            targetResolution: quality,
-            onProgress: (pct) => {
-              const compProgress = Math.min(35, Math.round(pct * 0.35));
-              setProgress(compProgress, `${STATE.lang === 'kn' ? 'ಸಂಕೋಚನ' : 'Compressing'}: ${pct}%`);
-            }
-          });
-          STATE.compressedFile = fileToUpload;
-        } catch (err) {
-          console.warn('Auto compression failed, falling back to original file:', err);
-          fileToUpload = STATE.selectedFile;
-        }
-      }
-
-      publishBtn.textContent = STATE.lang === 'kn' ? '🚀 2/2: ಅಪ್ಲೋಡ್ ಆಗುತ್ತಿದೆ...' : '🚀 2/2: Uploading to Cloudflare...';
+      publishBtn.textContent = STATE.lang === 'kn' ? '🚀 ಅಪ್ಲೋಡ್ ಆಗುತ್ತಿದೆ...' : '🚀 Uploading to Cloudflare...';
 
       const progressBox = document.getElementById('uploadProgressBox');
       progressBox.style.display = 'flex';
-      setProgress(35, STATE.lang === 'kn' ? '2. ಕ್ಲೌಡ್‌ಫ್ಲೇರ್ R2 ಸಂಗ್ರಹಣೆಗೆ ಸ್ಟ್ರೀಮಿಂಗ್...' : '2. Streaming to Cloudflare R2...');
-      setStepActive('step2');
+      setProgress(5, STATE.lang === 'kn' ? 'ಕ್ಲೌಡ್‌ಫ್ಲೇರ್ R2 ಸಂಗ್ರಹಣೆಗೆ ನೇರ ಅಪ್ಲೋಡ್...' : 'Direct streaming to Cloudflare R2...');
+      setStepActive('step1');
 
       const formData = new FormData();
       formData.append('title', fullTitle);
@@ -2763,6 +2437,8 @@
 
     // ── Success Modal & Sharing ───────────────────────────────────────────────
     function showSuccessModal(cdnUrl, title) {
+      STATE.lastUploadedCdnUrl = cdnUrl || '';
+      STATE.lastUploadedTitle = title || document.getElementById('postTitle').value || 'Public Samachar News';
       document.getElementById('successCdnUrlInput').value = cdnUrl || 'Video Published';
       document.getElementById('successModal').classList.add('active');
     }
@@ -2771,18 +2447,40 @@
       const input = document.getElementById('successCdnUrlInput');
       input.select();
       navigator.clipboard.writeText(input.value);
-      showToast('Video link copied to clipboard!', 'success');
+      showToast('ವಿಡಿಯೋ ಲಿಂಕ್ ಕಾಪಿ ಆಗಿದೆ (Video link copied)!', 'success');
+    }
+
+    function shareToInstagram() {
+      const title = STATE.lastUploadedTitle || document.getElementById('postTitle').value || 'Public Samachar News';
+      const url = STATE.lastUploadedCdnUrl || document.getElementById('successCdnUrlInput').value;
+      const caption = `${title}\n\n#PublicSamachar #Karnataka #News #Dharwad #BreakingNews\n\nವೀಕ್ಷಿಸಿ: ${url}`;
+
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(caption).then(() => {
+          showToast('ಶೀರ್ಷಿಕೆ & ಹ್ಯಾಶ್‌ಟ್ಯಾಗ್ ಕಾಪಿ ಆಗಿದೆ! Instagram ತೆರೆಯಲಾಗುತ್ತಿದೆ...', 'success');
+        }).catch(() => {});
+      }
+      setTimeout(() => {
+        window.open('https://www.instagram.com/', '_blank');
+      }, 350);
+    }
+
+    function shareToFacebook() {
+      const url = STATE.lastUploadedCdnUrl || document.getElementById('successCdnUrlInput').value;
+      const title = STATE.lastUploadedTitle || document.getElementById('postTitle').value || 'Public Samachar News';
+      const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(title)}`;
+      window.open(fbUrl, '_blank', 'width=620,height=580');
     }
 
     function shareToWhatsApp() {
-      const url = document.getElementById('successCdnUrlInput').value;
-      const title = document.getElementById('postTitle').value;
+      const url = STATE.lastUploadedCdnUrl || document.getElementById('successCdnUrlInput').value;
+      const title = STATE.lastUploadedTitle || document.getElementById('postTitle').value || 'Public Samachar News';
       const text = encodeURIComponent(`📺 *${title}* \n\nPublic Samachar ಸುದ್ದಿ ವೀಕ್ಷಿಸಿ:\n${url}`);
       window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
     }
 
     function openPublishedVideo() {
-      const url = document.getElementById('successCdnUrlInput').value;
+      const url = STATE.lastUploadedCdnUrl || document.getElementById('successCdnUrlInput').value;
       if (url && url.startsWith('http')) {
         window.open(url, '_blank');
       }
