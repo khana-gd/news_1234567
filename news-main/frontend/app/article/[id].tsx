@@ -166,11 +166,19 @@ export default function ArticleScreen() {
           {/* Title */}
           <Text testID="article-title" style={styles.title}>{post.title}</Text>
 
+          {/* Reporter Byline */}
+          <View testID="special-reporter-badge" style={styles.specialReporterBadge}>
+            <MaterialIcons name="edit" size={13} color="#00796B" />
+            <Text style={styles.specialReporterText}>
+              ವಿಶೇಷ ವರದಿಗಾರ: <Text style={styles.specialReporterName}>{post.mps_reporter_name || post.author || 'ಡೆಸ್ಕ್'}</Text>
+            </Text>
+          </View>
+
           {/* Meta */}
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
               <MaterialIcons name="person-outline" size={14} color="#999" />
-              <Text style={styles.metaText}>{post.author}</Text>
+              <Text style={styles.metaText}>{post.mps_reporter_name || post.author || 'ಡೆಸ್ಕ್'}</Text>
             </View>
             <TouchableOpacity
               testID="follow-reporter-btn"
@@ -197,9 +205,28 @@ export default function ArticleScreen() {
 
           <View style={styles.divider} />
 
-          {/* Excerpt / Content */}
+          {/* ✨ 30-Sec AI Summary Card */}
+          {post.mps_ai_summary && post.mps_ai_summary.length > 0 && (
+            <View testID="ai-summary-card" style={styles.summaryCard}>
+              <View style={styles.summaryHeader}>
+                <Text style={styles.summaryTitle}>✨ 30-ಸೆಕೆಂಡ್ ಮುಖ್ಯಾಂಶಗಳು (30-Sec Summary)</Text>
+              </View>
+              <View style={styles.summaryList}>
+                {post.mps_ai_summary.map((bullet, idx) => (
+                  <View key={idx} style={styles.summaryItem}>
+                    <Text style={styles.summaryBullet}>•</Text>
+                    <Text style={styles.summaryText}>{bullet}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Excerpt / Clean Content */}
           <Text testID="article-excerpt" style={styles.excerpt}>
-            {post.excerpt || (post.content ? post.content.replace(/<[^>]+>/g, '').substring(0, 500) : '')}
+            {post.mps_clean_content
+              ? post.mps_clean_content.replace(/<[^>]+>/g, '').trim()
+              : (post.excerpt || (post.content ? post.content.replace(/<[^>]+>/g, '').substring(0, 500) : ''))}
           </Text>
 
           {/* Read Full Article Button */}
@@ -377,7 +404,63 @@ const styles = StyleSheet.create({
   catBadge: { alignSelf: 'flex-start', backgroundColor: '#E91E8C', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12, marginBottom: 10 },
   catBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
 
-  title: { fontSize: 22, fontWeight: '900', color: '#111', lineHeight: 30, marginBottom: 12 },
+  title: { fontSize: 22, fontWeight: '900', color: '#111', lineHeight: 30, marginBottom: 10 },
+  specialReporterBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#E0F2F1',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  specialReporterText: {
+    fontSize: 13,
+    color: '#00695C',
+    fontWeight: '600',
+  },
+  specialReporterName: {
+    fontWeight: '800',
+    color: '#004D40',
+  },
+  summaryCard: {
+    backgroundColor: '#F4FBF9',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#B2DFDB',
+    padding: 14,
+    marginBottom: 18,
+  },
+  summaryHeader: {
+    marginBottom: 8,
+  },
+  summaryTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#00695C',
+  },
+  summaryList: {
+    gap: 6,
+  },
+  summaryItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  summaryBullet: {
+    fontSize: 16,
+    lineHeight: 20,
+    color: '#1AAA94',
+    fontWeight: '800',
+  },
+  summaryText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#263238',
+  },
 
   metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 14 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },

@@ -27,28 +27,35 @@ export default function ReporterLoginScreen() {
   const expired  = params.expired === 'true';
   const returnTo = params.returnTo || '';
 
-  const [reporterName, setReporterName] = useState('');
-  const [accessCode, setAccessCode]     = useState('');
+  const [username, setUsername]         = useState('');
+  const [password, setPassword]         = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading]           = useState(false);
   const [errorMsg, setErrorMsg]         = useState('');
 
-  // Pre-fill saved reporter name
+  // Pre-fill saved reporter username or name
   useEffect(() => {
-    AsyncStorage.getItem('reporter_name').then(n => {
-      if (n) setReporterName(n);
+    AsyncStorage.getItem('reporter_username').then(u => {
+      if (u) {
+        setUsername(u);
+      } else {
+        AsyncStorage.getItem('reporter_name').then(n => {
+          if (n) setUsername(n);
+        }).catch(() => {});
+      }
     }).catch(() => {});
   }, []);
 
   const handleLogin = useCallback(async () => {
-    const name = reporterName.trim();
-    const code = accessCode.trim().toUpperCase();
+    const user = username.trim().toLowerCase();
+    const pass = password.trim();
 
-    if (!name) {
-      setErrorMsg('Please enter your reporter name.');
+    if (!user) {
+      setErrorMsg('Please enter your username.');
       return;
     }
-    if (!code) {
-      setErrorMsg('Please enter your access code.');
+    if (!pass) {
+      setErrorMsg('Please enter your password.');
       return;
     }
 
@@ -59,13 +66,13 @@ export default function ReporterLoginScreen() {
       const res = await fetch(`${BACKEND}/api/reporter-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reporter_name: name, access_code: code }),
+        body: JSON.stringify({ username: user, password: pass }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const detail = data?.detail || 'Login failed. Please check your access code.';
+        const detail = data?.detail || 'Login failed. Please check your username and password.';
         setErrorMsg(detail);
         setLoading(false);
         return;
@@ -73,7 +80,12 @@ export default function ReporterLoginScreen() {
 
       // ── Store JWT & reporter info ──────────────────────────────────────────
       await AsyncStorage.setItem('reporter_jwt_token', data.token);
-      await AsyncStorage.setItem('reporter_name', data.reporter_name);
+      await AsyncStorage.setItem('reporter_name', data.full_name || data.reporter_name || user);
+      await AsyncStorage.setItem('reporter_username', data.username || user);
+      await AsyncStorage.setItem('reporter_district', data.district || 'Karnataka');
+      if (data.role) {
+        await AsyncStorage.setItem('reporter_role', data.role);
+      }
       await AsyncStorage.setItem(REPORTER_UNLOCK_KEY, 'true');
 
       // Navigate back
@@ -89,7 +101,7 @@ export default function ReporterLoginScreen() {
     }
 
     setLoading(false);
-  }, [reporterName, accessCode, returnTo, router]);
+  }, [username, password, returnTo, router]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -137,35 +149,50 @@ export default function ReporterLoginScreen() {
 
           {/* ── Form card ────────────────────────────────────────────────── */}
           <View style={styles.card}>
-            <Text style={styles.fieldLabel}>Your Reporter Name</Text>
+            <Text style={styles.fieldLabel}>Reporter Username</Text>
             <View style={styles.inputRow}>
               <MaterialIcons name="person" size={18} color="#1AAA94" />
               <TextInput
+                testID="reporter-username-input"
                 style={styles.input}
-                value={reporterName}
-                onChangeText={t => { setReporterName(t); setErrorMsg(''); }}
-                placeholder="Enter your full name..."
+                value={username}
+                onChangeText={t => { setUsername(t); setErrorMsg(''); }}
+                placeholder="e.g. sharanappa.g or girish.p.s"
                 placeholderTextColor="#888"
-                autoCapitalize="words"
+                autoCapitalize="none"
+                autoCorrect={false}
                 returnKeyType="next"
                 blurOnSubmit={false}
               />
             </View>
 
-            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Access Code</Text>
+            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Password</Text>
             <View style={styles.inputRow}>
               <MaterialIcons name="lock" size={18} color="#1AAA94" />
               <TextInput
+                testID="reporter-password-input"
                 style={styles.input}
-                value={accessCode}
-                onChangeText={t => { setAccessCode(t); setErrorMsg(''); }}
-                placeholder="Enter code (e.g. PS2026)"
+                value={password}
+                onChangeText={t => { setPassword(t); setErrorMsg(''); }}
+                placeholder="Enter your password..."
                 placeholderTextColor="#888"
-                autoCapitalize="characters"
-                secureTextEntry
+                autoCapitalize="none"
+                secureTextEntry={!showPassword}
                 returnKeyType="done"
                 onSubmitEditing={handleLogin}
               />
+              <TouchableOpacity
+                testID="toggle-password-visibility"
+                onPress={() => setShowPassword(v => !v)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={{ paddingHorizontal: 6 }}
+              >
+                <MaterialIcons
+                  name={showPassword ? 'visibility' : 'visibility-off'}
+                  size={20}
+                  color="#888"
+                />
+              </TouchableOpacity>
             </View>
 
             {/* Error message */}
@@ -196,8 +223,8 @@ export default function ReporterLoginScreen() {
 
           {/* ── Footer note ──────────────────────────────────────────────── */}
           <Text style={styles.footerNote}>
-            Contact your editor to get an access code.{'\n'}
-            Your session stays active for 30 days.
+            Contact your editor for reporter login credentials.{'\n'}
+            Your session stays active for 90 days.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>

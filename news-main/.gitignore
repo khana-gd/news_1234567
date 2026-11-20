@@ -36,6 +36,8 @@ dist
 *.env
 *token.json*
 *credentials.json*
+backend/reporter_credentials_PRIVATE.txt
+*reporter_credentials*
 
 # Logs and debug files
 npm-debug.log*

@@ -19,6 +19,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
 type Props = {
@@ -52,10 +53,15 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
   const [progress, setProgress]   = useState(0);
   const [progressMsg, setProgMsg] = useState('');
 
-  // Auto-fetch GPS when landing on details step
+  // Auto-fetch GPS or saved district when landing on details step
   useEffect(() => {
-    if (step === 'details' && !location) {
-      fetchGPS();
+    if (step === 'details') {
+      if (!location) {
+        AsyncStorage.getItem('reporter_district').then(d => {
+          if (d && !location) setLocation(d);
+        }).catch(() => {});
+        fetchGPS();
+      }
     }
   }, [step]);
 
@@ -143,18 +149,30 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
       const filename = videoAsset.uri.split('/').pop() || `vid_${Date.now()}.mp4`;
       const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 
+      const jwtToken    = await AsyncStorage.getItem('reporter_jwt_token').catch(() => null);
+      const repName     = await AsyncStorage.getItem('reporter_name').catch(() => null);
+      const repDistrict = await AsyncStorage.getItem('reporter_district').catch(() => null);
+
       const formData = new FormData();
       formData.append('title', title.trim());
       formData.append('description', description.trim() || '');
-      formData.append('location', location.trim() || '');
+      formData.append('location', location.trim() || repDistrict || '');
+      if (repName) {
+        formData.append('reporter_name', repName);
+      }
       formData.append('video', {
         uri: videoAsset.uri,
         type: videoAsset.mimeType || 'video/mp4',
         name: filename,
       } as any);
 
+      const headers: Record<string, string> = {};
+      if (jwtToken) {
+        headers['Authorization'] = `Bearer ${jwtToken}`;
+      }
+
       const resp = await axios.post(`${backendUrl}/api/submit-video`, formData, {
-        // No manual Content-Type — React Native sets multipart/form-data + boundary automatically
+        headers,
         timeout: 600000, // 10 min
         onUploadProgress: (evt) => {
           const total = evt.total ?? 0;

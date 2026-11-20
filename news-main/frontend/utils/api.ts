@@ -47,6 +47,10 @@ export interface Post {
   link: string;
   comment_count: number;
   status: string;
+  mps_clean_content?: string;
+  mps_reporter_name?: string;
+  mps_ai_summary?: string[];
+  mps_featured_image?: string | null;
 }
 
 export interface Category {
@@ -89,31 +93,54 @@ const fetchJson = async (url: string, options?: RequestInit) => {
 // ── WordPress raw → Post ──────────────────────────────────────────────────────
 const parseWPPost = (p: any): Post => {
   const sizes = p._embedded?.['wp:featuredmedia']?.[0]?.media_details?.sizes || {};
-  const featuredImage =
+  const embeddedImage =
     sizes.medium?.source_url ||
     sizes.medium_large?.source_url ||
     sizes.thumbnail?.source_url ||
     p._embedded?.['wp:featuredmedia']?.[0]?.source_url ||
     null;
+  const featuredImage = p.mps_featured_image || embeddedImage;
+
   const categoryTerms: any[] = p._embedded?.['wp:term']?.[0] || [];
   const decodeEntities = (str: string) =>
     str.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'");
+
+  // Clean content: prefer mps_clean_content, fallback to content.rendered with regex stripping ads and carriage returns
+  const rawContent = p.content?.rendered || '';
+  const cleanContentFallback = rawContent.replace(/\[ad[_-]?\d+\]|\\r|\r/gi, '').trim();
+  const mpsCleanContent = p.mps_clean_content ? String(p.mps_clean_content).trim() : cleanContentFallback;
+
+  // Reporter name: prefer mps_reporter_name, fallback to author embedded name or 'ಡೆಸ್ಕ್'
+  const mpsReporterName = p.mps_reporter_name || p._embedded?.author?.[0]?.name || 'ಡೆಸ್ಕ್';
+
+  // AI summary: array of 3 bullet points
+  let mpsAiSummary: string[] = [];
+  if (Array.isArray(p.mps_ai_summary)) {
+    mpsAiSummary = p.mps_ai_summary.map((s: any) => String(s).trim()).filter(Boolean);
+  } else if (typeof p.mps_ai_summary === 'string' && p.mps_ai_summary.trim()) {
+    mpsAiSummary = [p.mps_ai_summary.trim()];
+  }
+
   return {
     id: p.id,
     slug: p.slug || '',
     title: decodeEntities(p.title?.rendered || ''),
     excerpt: p.excerpt?.rendered || '',
-    content: p.content?.rendered || '',
+    content: mpsCleanContent,
     date: p.date || '',
     modified: p.modified || '',
     featured_image: featuredImage,
     categories: p.categories || [],
     category_names: categoryTerms.map((t: any) => ({ id: t.id, name: t.name, slug: t.slug })),
-    author: p._embedded?.author?.[0]?.name || '',
+    author: mpsReporterName,
     link: p.link || '',
     comment_count: Number(p.comment_count) || 0,
     status: p.status || 'publish',
+    mps_clean_content: mpsCleanContent,
+    mps_reporter_name: mpsReporterName,
+    mps_ai_summary: mpsAiSummary,
+    mps_featured_image: featuredImage,
   };
 };
 
