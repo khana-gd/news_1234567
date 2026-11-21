@@ -147,6 +147,19 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
     setErrorMsg(null);
 
     try {
+      let uploadUri = videoAsset.uri;
+      try {
+        const opt = await optimizeVideoForUpload(videoAsset.uri, 'rural', (pct, statusText) => {
+          setProgress(Math.round(pct * 0.35));
+          setProgMsg(statusText || (isKn ? 'ವಿಡಿಯೋ ಕಂಪ್ರೆಸ್ ಆಗುತ್ತಿದೆ...' : 'Optimizing video...'));
+        });
+        if (opt && opt.uri) {
+          uploadUri = opt.uri;
+        }
+      } catch (optErr) {
+        console.warn('Local compression bypassed, falling back to source video:', optErr);
+      }
+
       const filename = videoAsset.uri.split('/').pop() || `vid_${Date.now()}.mp4`;
       const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 
