@@ -2621,11 +2621,11 @@ def get_ffmpeg_binary() -> Optional[str]:
         return None
 
 
-def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int = 1280, crf: int = 23) -> bool:
+def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int = 1280, crf: int = 26) -> bool:
     """
     Enterprise-grade video normalization & instant mobile streaming prep:
     - Constant 30fps CFR: Eliminates player freezing, camera stutter, and variable framerate drops.
-    - Bitrate bounded (maxrate 2200k/3600k): Zero buffering on mobile 4G/5G connections.
+    - Bitrate bounded (maxrate 1500k/2400k): Zero buffering on mobile 4G/5G connections.
     - Audio resync (aresample=async=1000): Guaranteed lip-sync and clock alignment.
     - Truncate sync (-shortest): Video and audio tracks finish at the exact same millisecond.
     - Instant playback (-movflags +faststart): Relocates MOOV atom to byte 0 for sub-100ms startup.
@@ -2636,8 +2636,8 @@ def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int =
         logger.warning("FFmpeg not found in system PATH or imageio. Skipping server-side compression.")
         return False
     try:
-        max_rate = "3600k" if max_dim > 1280 else "2200k"
-        buf_size = "7200k" if max_dim > 1280 else "4400k"
+        max_rate = "2400k" if max_dim > 1280 else "1500k"
+        buf_size = "4800k" if max_dim > 1280 else "3000k"
         vf = f"scale='if(gt(iw,ih),min({max_dim},iw),-2)':'if(gt(iw,ih),-2,min({max_dim},ih))',format=yuv420p"
 
         cmd = [
@@ -2655,7 +2655,7 @@ def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int =
             "-ac", "2",
             "-af", "aresample=async=1000",
             "-shortest",
-            "-threads", "0",
+            "-threads", "2",
             "-movflags", "+faststart",
             output_path
         ]
@@ -2831,6 +2831,15 @@ async def upload_cf_video(
     temp_dir.mkdir(parents=True, exist_ok=True)
     raw_path = temp_dir / f"{video_id}_raw.mp4"
     compressed_path = temp_dir / f"{video_id}_compressed.mp4"
+    auto_thumb_path = temp_dir / f"{video_id}_thumb.jpg"
+
+    compression_info = {
+        "compressed": False,
+        "original_size": "0 MB",
+        "compressed_size": "0 MB",
+        "reduction": "0%",
+        "quality": video_quality
+    }
 
     try:
         # Save incoming video to temp file
@@ -2841,12 +2850,13 @@ async def upload_cf_video(
                     break
                 f_out.write(chunk)
 
+        orig_sz = raw_path.stat().st_size if raw_path.exists() else 0
         final_upload_path = raw_path
 
-        # Run FFmpeg compression in background thread (1080p Ultra HD or 720p HD)
+        # Run FFmpeg compression in background thread (1080p Full HD or 720p HD)
         loop = asyncio.get_running_loop()
         target_dim = 1920 if video_quality == '1080p' else 1280
-        target_crf = 20 if video_quality == '1080p' else 26
+        target_crf = 24 if video_quality == '1080p' else 27
         compress_ok = await loop.run_in_executor(
             _upload_executor,
             compress_video_with_ffmpeg,
@@ -2855,8 +2865,34 @@ async def upload_cf_video(
             target_dim,
             target_crf,
         )
-        if compress_ok and compressed_path.exists():
-            final_upload_path = compressed_path
+        if compress_ok and compressed_path.exists() and compressed_path.stat().st_size > 0:
+            comp_sz = compressed_path.stat().st_size
+            if comp_sz < orig_sz or orig_sz == 0:
+                final_upload_path = compressed_path
+                ratio = max(0.0, ((orig_sz - comp_sz) / orig_sz) * 100.0) if orig_sz > 0 else 0.0
+                compression_info = {
+                    "compressed": True,
+                    "original_size": f"{orig_sz / (1024 * 1024):.2f} MB",
+                    "compressed_size": f"{comp_sz / (1024 * 1024):.2f} MB",
+                    "reduction": f"{ratio:.1f}%",
+                    "quality": video_quality
+                }
+            else:
+                compression_info = {
+                    "compressed": True,
+                    "original_size": f"{orig_sz / (1024 * 1024):.2f} MB",
+                    "compressed_size": f"{comp_sz / (1024 * 1024):.2f} MB",
+                    "reduction": "0%",
+                    "quality": video_quality
+                }
+        else:
+            compression_info = {
+                "compressed": False,
+                "original_size": f"{orig_sz / (1024 * 1024):.2f} MB",
+                "compressed_size": f"{orig_sz / (1024 * 1024):.2f} MB",
+                "reduction": "0%",
+                "quality": video_quality
+            }
 
         # ── Stream compressed video to R2 in a thread pool ─────────────────────
         with open(final_upload_path, "rb") as f_in:
@@ -2869,49 +2905,41 @@ async def upload_cf_video(
             )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to upload video to storage. Please try again.")
-    finally:
-        try:
-            if raw_path.exists():
-                raw_path.unlink()
-            if compressed_path.exists():
-                compressed_path.unlink()
-        except Exception:
-            pass
 
-    # ── Upload thumbnail (optimized for WhatsApp / social preview < 200KB) ────────────
-    thumb_key = ''
-    if thumbnail:
-        thumb_data = await thumbnail.read()
-        thumb_data = optimize_thumbnail_image(thumb_data)
-        thumb_key = f'news_feed/thumbs/{video_id}.jpg'
-        if not r2_upload_object(thumb_key, thumb_data, 'image/jpeg'):
-            thumb_key = ''
-    elif get_ffmpeg_binary() and final_upload_path and Path(final_upload_path).exists():
-        # Auto-extract high-quality thumbnail poster frame if client didn't supply one
-        auto_thumb_path = temp_dir / f"{video_id}_thumb.jpg"
-        try:
-            ffmpeg_bin = get_ffmpeg_binary()
-            cmd = [
-                ffmpeg_bin, "-y", "-ss", "00:00:01",
-                "-i", str(final_upload_path),
-                "-vframes", "1",
-                "-q:v", "2",
-                str(auto_thumb_path)
-            ]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
-            if res.returncode == 0 and auto_thumb_path.exists() and auto_thumb_path.stat().st_size > 0:
-                thumb_data = optimize_thumbnail_image(auto_thumb_path.read_bytes())
-                thumb_key = f'news_feed/thumbs/{video_id}.jpg'
-                if not r2_upload_object(thumb_key, thumb_data, 'image/jpeg'):
-                    thumb_key = ''
-        except Exception as e:
-            logger.warning(f"Auto-thumbnail extraction failed: {e}")
-        finally:
-            if auto_thumb_path.exists():
-                try:
-                    auto_thumb_path.unlink()
-                except Exception:
-                    pass
+        # ── Upload thumbnail (optimized for WhatsApp / social preview < 200KB) ────────────
+        thumb_key = ''
+        if thumbnail:
+            thumb_data = await thumbnail.read()
+            thumb_data = optimize_thumbnail_image(thumb_data)
+            thumb_key = f'news_feed/thumbs/{video_id}.jpg'
+            if not r2_upload_object(thumb_key, thumb_data, 'image/jpeg'):
+                thumb_key = ''
+        elif get_ffmpeg_binary() and final_upload_path and final_upload_path.exists():
+            # Auto-extract high-quality thumbnail poster frame if client didn't supply one
+            try:
+                ffmpeg_bin = get_ffmpeg_binary()
+                cmd = [
+                    ffmpeg_bin, "-y", "-ss", "00:00:01",
+                    "-i", str(final_upload_path),
+                    "-vframes", "1",
+                    "-q:v", "2",
+                    str(auto_thumb_path)
+                ]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+                if res.returncode == 0 and auto_thumb_path.exists() and auto_thumb_path.stat().st_size > 0:
+                    thumb_data = optimize_thumbnail_image(auto_thumb_path.read_bytes())
+                    thumb_key = f'news_feed/thumbs/{video_id}.jpg'
+                    if not r2_upload_object(thumb_key, thumb_data, 'image/jpeg'):
+                        thumb_key = ''
+            except Exception as e:
+                logger.warning(f"Auto-thumbnail extraction failed: {e}")
+    finally:
+        for p in (raw_path, compressed_path, auto_thumb_path):
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
 
     # ── Save metadata to D1 ──────────────────────────────────────────────────
     caution_flag = 1 if _check_caution(title) else 0
@@ -2973,7 +3001,8 @@ async def upload_cf_video(
         'video_url': video_url,
         'thumb_url': thumb_url,
         'post_to_fb': post_to_fb,
-        'post_to_ig': post_to_ig
+        'post_to_ig': post_to_ig,
+        'compression': compression_info
     }
 
 
