@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { optimizeVideoForUpload } from '../utils/videoOptimizer';
 
 type Props = {
   visible: boolean;
@@ -161,7 +162,7 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
         formData.append('reporter_name', repName);
       }
       formData.append('video', {
-        uri: videoAsset.uri,
+        uri: uploadUri,
         type: videoAsset.mimeType || 'video/mp4',
         name: filename,
       } as any);

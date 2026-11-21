@@ -1012,11 +1012,43 @@ async def submit_video(
     thumb_key = ''
 
     loop = asyncio.get_running_loop()
+
+    # Server-Side FFmpeg Compression if available
+    final_upload_data = video_data
+    ffmpeg_bin = get_ffmpeg_binary()
+    if ffmpeg_bin:
+        temp_dir = Path(tempfile.gettempdir()) / "ps_video_processing"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        raw_path = temp_dir / f"{video_id}_raw.mp4"
+        comp_path = temp_dir / f"{video_id}_comp.mp4"
+        try:
+            raw_path.write_bytes(video_data)
+            compress_ok = await loop.run_in_executor(
+                _upload_executor,
+                compress_video_with_ffmpeg,
+                str(raw_path),
+                str(comp_path),
+                1280,
+                24,
+            )
+            if compress_ok and comp_path.exists() and comp_path.stat().st_size > 0:
+                final_upload_data = comp_path.read_bytes()
+                logger.info(f"submit_video: Server compressed {len(video_data)} -> {len(final_upload_data)} bytes")
+        except Exception as ce:
+            logger.warning(f"Server compression notice: {ce}")
+        finally:
+            for p in [raw_path, comp_path]:
+                if p.exists():
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+
     cf_uploaded = await loop.run_in_executor(
         _upload_executor,
         r2_upload_object,
         video_key,
-        video_data,
+        final_upload_data,
         content_type,
     )
 
@@ -2577,6 +2609,18 @@ async def save_video_meta(request: Request, _auth: dict = Depends(require_report
     return {'success': True, 'video_id': video_id}
 
 
+def get_ffmpeg_binary() -> Optional[str]:
+    """Resolve FFmpeg executable: checks system PATH first, then imageio-ffmpeg static binary."""
+    exe = shutil.which("ffmpeg")
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
 def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int = 1280, crf: int = 23) -> bool:
     """
     Enterprise-grade video normalization & instant mobile streaming prep:
@@ -2587,8 +2631,9 @@ def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int =
     - Instant playback (-movflags +faststart): Relocates MOOV atom to byte 0 for sub-100ms startup.
     - Universal compatibility (yuv420p): Flawless rendering across Android, iOS, and Web.
     """
-    if not shutil.which("ffmpeg"):
-        logger.warning("FFmpeg not found in system PATH. Skipping server-side compression.")
+    ffmpeg_bin = get_ffmpeg_binary()
+    if not ffmpeg_bin:
+        logger.warning("FFmpeg not found in system PATH or imageio. Skipping server-side compression.")
         return False
     try:
         max_rate = "3600k" if max_dim > 1280 else "2200k"
@@ -2596,7 +2641,7 @@ def compress_video_with_ffmpeg(input_path: str, output_path: str, max_dim: int =
         vf = f"scale='if(gt(iw,ih),min({max_dim},iw),-2)':'if(gt(iw,ih),-2,min({max_dim},ih))',format=yuv420p"
 
         cmd = [
-            "ffmpeg", "-y", "-i", input_path,
+            ffmpeg_bin, "-y", "-i", input_path,
             "-vf", vf,
             "-c:v", "libx264",
             "-preset", "veryfast",
@@ -2841,12 +2886,13 @@ async def upload_cf_video(
         thumb_key = f'news_feed/thumbs/{video_id}.jpg'
         if not r2_upload_object(thumb_key, thumb_data, 'image/jpeg'):
             thumb_key = ''
-    elif shutil.which("ffmpeg") and final_upload_path and Path(final_upload_path).exists():
+    elif get_ffmpeg_binary() and final_upload_path and Path(final_upload_path).exists():
         # Auto-extract high-quality thumbnail poster frame if client didn't supply one
         auto_thumb_path = temp_dir / f"{video_id}_thumb.jpg"
         try:
+            ffmpeg_bin = get_ffmpeg_binary()
             cmd = [
-                "ffmpeg", "-y", "-ss", "00:00:01",
+                ffmpeg_bin, "-y", "-ss", "00:00:01",
                 "-i", str(final_upload_path),
                 "-vframes", "1",
                 "-q:v", "2",

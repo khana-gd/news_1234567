@@ -25,3 +25,4 @@ python-multipart>=0.0.9
 typer>=0.9.0
 httpx>=0.28.0
 
+imageio-ffmpeg>=0.5.1
