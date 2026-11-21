@@ -17,7 +17,7 @@ import PendingUploadsSheet from '../../components/PendingUploadsSheet';
 import { useRouter, useFocusEffect } from 'expo-router';
 
 const WP_LOGIN_URL = process.env.EXPO_PUBLIC_WP_LOGIN_URL || 'https://mypublicsamachar.com/user-2/';
-const SUBMIT_NEWS_URL = process.env.EXPO_PUBLIC_SUBMIT_NEWS_URL || 'https://mypublicsamachar.com/submit-story/';
+const SUBMIT_NEWS_URL = process.env.EXPO_PUBLIC_SUBMIT_NEWS_URL || 'https://mypublicsamachar.com/submit-news';
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
 const REPORTER_UNLOCK_KEY = 'reporter_unlocked_v1';
 const PRIVACY_POLICY_URL = 'https://mypublicsamachar.com/privacy-policy/';
@@ -221,20 +221,27 @@ export default function UserScreen() {
           <TouchableOpacity
             testID="submit-news-btn"
             style={styles.submitNewsBtn}
-            onPress={() => Linking.openURL(SUBMIT_NEWS_URL)}
+            onPress={() => router.push('/post-news' as any)}
             activeOpacity={0.85}
           >
             <MaterialIcons name="edit" size={22} color="#fff" />
             <Text style={styles.submitNewsBtnText}>
-              {language === 'kn' ? 'ಸುದ್ದಿ ಸಲ್ಲಿಸಿ' : 'Submit News'}
+              {language === 'kn' ? 'ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ (Post News)' : 'Post News Story'}
             </Text>
-            <MaterialIcons name="open-in-new" size={16} color="rgba(255,255,255,0.8)" />
           </TouchableOpacity>
-          <Text style={styles.submitNewsNote}>
-            {language === 'kn'
-              ? 'ಸ್ಟೋರಿ ಸಲ್ಲಿಸಲು ಇಲ್ಲಿ ಕ್ಲಿಕ್ ಮಾಡಿ'
-              : 'Tap to submit a story on our website'}
-          </Text>
+          <TouchableOpacity
+            style={{ marginTop: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            onPress={() => Linking.openURL(SUBMIT_NEWS_URL)}
+            activeOpacity={0.7}
+          >
+            <MaterialIcons name="language" size={16} color="#1AAA94" />
+            <Text style={{ fontSize: 13, color: '#1AAA94', fontWeight: '700' }}>
+              {language === 'kn'
+                ? 'ವೆಬ್‌ಸೈಟ್ ಪೋರ್ಟಲ್‌ನಲ್ಲಿ ಸುದ್ದಿ ಸಲ್ಲಿಸಲು ಇಲ್ಲಿ ಕ್ಲಿಕ್ ಮಾಡಿ'
+                : 'Or submit news on our website portal'}
+            </Text>
+            <MaterialIcons name="open-in-new" size={14} color="#1AAA94" />
+          </TouchableOpacity>
         </View>
 
         {/* Reporter Access */}
@@ -243,10 +250,16 @@ export default function UserScreen() {
             {language === 'kn' ? 'ವರದಿಗಾರ ಪ್ರವೇಶ' : 'Reporter Access'}
           </Text>
 
-          {!isLoggedIn ? (
-            <TouchableOpacity testID="login-btn" style={styles.loginBtn} onPress={() => setShowWebView(true)}>
+          {!isReporterUnlocked && !isLoggedIn ? (
+            <TouchableOpacity
+              testID="login-btn"
+              style={styles.loginBtn}
+              onPress={() => router.push({ pathname: '/reporter-login', params: { source: 'user_tab' } } as any)}
+            >
               <MaterialIcons name="login" size={20} color="#fff" />
-              <Text style={styles.loginBtnText}>{t('login')}</Text>
+              <Text style={styles.loginBtnText}>
+                {language === 'kn' ? 'ವರದಿಗಾರರಾಗಿ ಲಾಗ್ ಇನ್ ಮಾಡಿ (Reporter Login)' : 'Reporter Login'}
+              </Text>
             </TouchableOpacity>
           ) : (
             <View>
@@ -256,9 +269,11 @@ export default function UserScreen() {
                     <MaterialIcons name="verified-user" size={22} color="#388E3C" />
                   </View>
                   <View>
-                    <Text style={styles.loggedInTitle}>{t('loggedIn')}</Text>
+                    <Text style={styles.loggedInTitle}>
+                      {reporterName || (language === 'kn' ? 'ದೃಢೀಕೃತ ವರದಿಗಾರರು' : 'Verified Reporter')}
+                    </Text>
                     <Text style={styles.loggedInDesc}>
-                      {language === 'kn' ? 'ವರದಿಗಾರರಾಗಿ ಲಾಗ್ ಇನ್' : 'Logged in as reporter'}
+                      {language === 'kn' ? 'ವರದಿಗಾರ ಖಾತೆ ಸಕ್ರಿಯವಾಗಿದೆ' : 'Reporter account active'}
                     </Text>
                   </View>
                 </View>
@@ -268,13 +283,29 @@ export default function UserScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Upload Video */}
-              <TouchableOpacity testID="upload-video-btn" style={styles.uploadVideoBtn} onPress={() => setShowReporterUpload(true)}>
-                <MaterialIcons name="video-call" size={22} color="#fff" />
-                <Text style={styles.uploadVideoBtnText}>
-                  {language === 'kn' ? 'ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಮಾಡಿ' : 'Upload Video'}
-                </Text>
-              </TouchableOpacity>
+              {/* Action Buttons: Post News + Upload Video */}
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                <TouchableOpacity
+                  style={[styles.uploadVideoBtn, { flex: 1, backgroundColor: '#10B981' }]}
+                  onPress={() => router.push('/post-news' as any)}
+                >
+                  <MaterialIcons name="article" size={20} color="#fff" />
+                  <Text style={styles.uploadVideoBtnText}>
+                    {language === 'kn' ? 'ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ' : 'Post Story'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  testID="upload-video-btn"
+                  style={[styles.uploadVideoBtn, { flex: 1 }]}
+                  onPress={() => setShowReporterUpload(true)}
+                >
+                  <MaterialIcons name="video-call" size={20} color="#fff" />
+                  <Text style={styles.uploadVideoBtnText}>
+                    {language === 'kn' ? 'ವಿಡಿಯೋ ಅಪ್ಲೋಡ್' : 'Upload Video'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -282,8 +313,8 @@ export default function UserScreen() {
             <MaterialIcons name="info-outline" size={16} color="#1AAA94" />
             <Text style={styles.infoText}>
               {language === 'kn'
-                ? 'ಲಾಗಿನ್ ನಂತರ ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಮಾಡಬಹುದು'
-                : 'Login to upload video content for review'}
+                ? 'ವರದಿಗಾರರ ಖಾತೆಯಿಂದ ಸುದ್ದಿ ಹಾಗೂ ವಿಡಿಯೋಗಳನ್ನು ನೇರವಾಗಿ ಪ್ರಕಟಿಸಬಹುದು.'
+                : 'Publish news stories and videos directly using your reporter account.'}
             </Text>
           </View>
         </View>
@@ -310,17 +341,30 @@ export default function UserScreen() {
                   </Text>
                 </View>
               </View>
-              {/* Direct Upload Button */}
-              <TouchableOpacity
-                style={styles.directUploadBtn}
-                onPress={() => setShowReporterUpload(true)}
-                activeOpacity={0.85}
-              >
-                <MaterialIcons name="cloud-upload" size={20} color="#fff" />
-                <Text style={styles.directUploadTxt}>
-                  {language === 'kn' ? 'ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಮಾಡಿ' : 'Upload Video to Website'}
-                </Text>
-              </TouchableOpacity>
+              {/* Action Buttons: Post News + Upload Video */}
+              <View style={{ gap: 8, marginTop: 4 }}>
+                <TouchableOpacity
+                  style={[styles.directUploadBtn, { backgroundColor: '#10B981' }]}
+                  onPress={() => router.push('/post-news' as any)}
+                  activeOpacity={0.85}
+                >
+                  <MaterialIcons name="edit-note" size={20} color="#fff" />
+                  <Text style={styles.directUploadTxt}>
+                    {language === 'kn' ? '📝 ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ (Post News Article)' : '📝 Post News Article'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.directUploadBtn}
+                  onPress={() => setShowReporterUpload(true)}
+                  activeOpacity={0.85}
+                >
+                  <MaterialIcons name="cloud-upload" size={20} color="#fff" />
+                  <Text style={styles.directUploadTxt}>
+                    {language === 'kn' ? '🎬 ವಿಡಿಯೋ ಅಪ್ಲೋಡ್ ಮಾಡಿ' : '🎬 Upload Video to Feed'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
               {/* ── Reporter Name for Video Overlays ── */}
               <View style={{ marginTop: 12, gap: 6 }}>

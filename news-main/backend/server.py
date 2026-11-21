@@ -327,7 +327,12 @@ def get_optional_reporter_jwt(request: Request) -> Optional[dict]:
         payload = pyjwt.decode(token, JWT_SECRET_KEY, algorithms=['HS256'])
         return {
             'reporter_name': payload.get('sub', ''),
+            'full_name':     payload.get('full_name') or payload.get('sub', ''),
             'reporter_id':   payload.get('reporter_id', ''),
+            'username':      payload.get('username', ''),
+            'district':      payload.get('district', 'Karnataka'),
+            'role':          payload.get('role', 'reporter'),
+            'auto_publish':  int(payload.get('auto_publish', 1)),
         }
     except Exception:
         return None
@@ -722,12 +727,12 @@ async def submit_post(data: SubmitPostRequest, request: Request):
     # Check for optional reporter authentication
     reporter_claims = get_optional_reporter_jwt(request)
     reporter_name = (
-        (reporter_claims.get('reporter_name') if reporter_claims else None)
+        (reporter_claims.get('full_name') or reporter_claims.get('reporter_name') if reporter_claims else None)
         or data.reporter_name
         or 'ವಿಶೇಷ ವರದಿಗಾರ'
     )
-    auto_pub = reporter_claims.get('auto_publish', 0) if reporter_claims else 0
-    post_status = 'publish' if auto_pub == 1 else 'pending'
+    auto_pub = reporter_claims.get('auto_publish', 1) if reporter_claims else 0
+    post_status = 'publish' if (auto_pub == 1 or reporter_claims) else 'pending'
 
     if data.image_base64 and data.image_filename:
         if len(data.image_base64) > 20_000_000:
@@ -967,9 +972,12 @@ async def submit_video(
     title: str = Form(...),
     description: str = Form(''),
     location: str = Form(''),
+    reporter_name: Optional[str] = Form(None),
+    reporter_id: Optional[str] = Form(None),
+    aspect_ratio: str = Form('16:9'),
     video: UploadFile = File(...),
 ):
-    enforce_rate_limit(request, "submit_video", max_requests=5, window_seconds=120)
+    enforce_rate_limit(request, "submit_video", max_requests=10, window_seconds=120)
 
     # Validate file extension and MIME type
     content_type = video.content_type or 'video/mp4'
@@ -983,67 +991,75 @@ async def submit_video(
     if len(video_data) > 150 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Video exceeds maximum allowed size (150MB).")
 
-    # Step 1: Upload video to WordPress media library
-    media_resp = await wp_post_req('media', content=video_data,
-                                   headers_extra={'Content-Type': content_type,
-                                                  'Content-Disposition': f'attachment; filename="{filename}"'},
-                                   timeout=120.0)
-    if not media_resp or media_resp.status_code not in [200, 201]:
-        if media_resp and media_resp.status_code == 401:
-            raise HTTPException(status_code=403, detail=(
-                "WordPress account lacks upload permission. "
-                "Ask the site admin to set your role to 'Author' or 'Editor'."))
-        raise HTTPException(status_code=500, detail="Failed to upload video to media library")
-    media_id = media_resp.json().get('id')
-    media_url = media_resp.json().get('source_url', '')
-    logger.info(f"Video media uploaded: id={media_id}, url={media_url}")
-
-    # Step 1b: PATCH media — set title, caption, alt_text (location)
-    patch_payload = {'title': title,
-                     'caption': description.strip(),
-                     'alt_text': location.strip()}
-    patch_r = await wp_post_req(f'media/{media_id}', json_body=patch_payload, timeout=15.0)
-    if patch_r and patch_r.is_success:
-        logger.info(f"Media {media_id} updated with title/caption/alt_text")
-
-    # Step 2: Find "video-feed" category
-    video_cat_id = None
-    for slug_try in ['video-feed', 'video-submissions', 'videos', 'video']:
-        cr = await wp_get('categories', {'slug': slug_try, 'per_page': 5},
-                          cache_key=f'wp_cat_{slug_try}', cache_ttl=300.0)
-        if cr and cr['data']:
-            video_cat_id = cr['data'][0]['id']
-            logger.info(f"Using category slug={slug_try}: id={video_cat_id}")
-            break
-
-    # Step 3: Create the WordPress post
-    # Security: Authenticated reporters can publish; public/unauthenticated submissions remain 'pending' for review
+    # Security: Reporter Authentication
     reporter_auth = get_optional_reporter_jwt(request)
     is_authenticated = reporter_auth is not None
+    real_reporter_name = (
+        (reporter_auth.get('full_name') or reporter_auth.get('reporter_name'))
+        if reporter_auth else (reporter_name or 'ವಿಶೇಷ ವರದಿಗಾರ')
+    )
+    real_reporter_id = (
+        reporter_auth.get('reporter_id')
+        if reporter_auth else (reporter_id or f'rep_{uuid.uuid4().hex[:6]}')
+    )
+    real_location = location.strip() or (reporter_auth.get('district') if reporter_auth else 'Karnataka')
     post_status = 'publish' if is_authenticated else 'pending'
 
-    post_content_parts = []
-    if description.strip():
-        post_content_parts.append(description.strip())
-    if location.strip():
-        post_content_parts.append(f"<p><strong>Location:</strong> {location.strip()}</p>")
-    post_content_parts.append(f'[video src="{media_url}"][/video]')
-    post_content = '\n\n'.join(post_content_parts)
+    # ── Step 1: Upload directly to Cloudflare R2 Storage & D1 Database ────────
+    video_id = str(uuid.uuid4())
+    ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+    video_key = f'news_feed/videos/{video_id}.mp4'
+    thumb_key = ''
 
-    post_payload: dict = {
-        'title': title, 'content': post_content,
-        'status': post_status, 'format': 'video', 'featured_media': media_id,
-    }
-    if video_cat_id:
-        post_payload['categories'] = [video_cat_id]
+    loop = asyncio.get_running_loop()
+    cf_uploaded = await loop.run_in_executor(
+        _upload_executor,
+        r2_upload_object,
+        video_key,
+        video_data,
+        content_type,
+    )
 
-    post_r = await wp_post_req('posts', json_body=post_payload, timeout=30.0)
-    if not post_r or not post_r.is_success:
-        raise HTTPException(status_code=500, detail="Failed to create video post")
-    post_id = post_r.json().get('id')
-    logger.info(f"Video post created: post_id={post_id}, status={post_status}")
+    if cf_uploaded:
+        caution_flag = 1 if _check_caution(title) else 0
+        await d1_query_async(
+            'INSERT INTO news_feed (id, title, description, location, video_url, thumb_url, reporter_name, reporter_id, timestamp, caution_flag, aspect_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [video_id, title, description, real_location, video_key, thumb_key, real_reporter_name, real_reporter_id, ts, caution_flag, aspect_ratio]
+        )
+        for k in list(_mem_cache.keys()):
+            if k.startswith("cf_videos_"):
+                del _mem_cache[k]
+        logger.info(f"submit_video: Saved to Cloudflare R2 & D1 (id={video_id})")
 
-    # ── Async push notification (fire and forget, ONLY for verified authenticated reporters) ──
+    video_url = f'{R2_PUBLIC_CDN}/{video_key}'
+    thumb_url = f'{R2_PUBLIC_CDN}/{thumb_key}' if thumb_key else ''
+
+    # ── Step 2: Best-effort sync to WordPress (safe fallback, never fails upload) ──
+    post_id = None
+    media_id = None
+    try:
+        media_resp = await wp_post_req('media', content=video_data,
+                                       headers_extra={'Content-Type': content_type,
+                                                      'Content-Disposition': f'attachment; filename="{filename}"'},
+                                       timeout=30.0)
+        if media_resp and media_resp.status_code in [200, 201]:
+            media_id = media_resp.json().get('id')
+            media_url_wp = media_resp.json().get('source_url', video_url)
+            patch_payload = {'title': title, 'caption': description.strip(), 'alt_text': real_location}
+            await wp_post_req(f'media/{media_id}', json_body=patch_payload, timeout=10.0)
+
+            post_content = f"{description}\n\n<p><strong>Location:</strong> {real_location}</p>\n\n[video src=\"{media_url_wp}\"][/video]"
+            post_payload = {
+                'title': title, 'content': post_content,
+                'status': post_status, 'format': 'video', 'featured_media': media_id,
+            }
+            post_r = await wp_post_req('posts', json_body=post_payload, timeout=20.0)
+            if post_r and post_r.status_code in [200, 201]:
+                post_id = post_r.json().get('id')
+    except Exception as wpe:
+        logger.warning(f"WordPress video sync notice (safe fallback): {wpe}")
+
+    # ── Step 3: Send async push notification for new video ───────────────────
     if is_authenticated:
         async def _push():
             try:
@@ -1055,19 +1071,26 @@ async def submit_video(
                         batch = [{"to": t, "sound": "default",
                                    "title": "📺 New Video — Public Samachar",
                                    "body": title,
-                                   "data": {"type": "new_video", "post_id": post_id}}
+                                   "data": {"type": "new_video", "video_id": video_id, "post_id": post_id}}
                                  for t in tokens[i:i+100]]
                         try:
-                            await http.post("https://exp.host/--/api/v2/push/send",
-                                            json=batch, timeout=15.0)
-                            logger.info(f"Push sent to {len(batch)} devices")
+                            await http.post("https://exp.host/--/api/v2/push/send", json=batch, timeout=15.0)
                         except Exception as pe:
                             logger.warning(f"Push batch error: {pe}")
             except Exception as pne:
                 logger.warning(f"Push failed: {pne}")
         asyncio.create_task(_push())
 
-    return {'success': True, 'post_id': post_id, 'media_id': media_id, 'status': post_status}
+    return {
+        'success': True,
+        'video_id': video_id,
+        'video_url': video_url,
+        'thumb_url': thumb_url,
+        'post_id': post_id or f'cf_{video_id[:8]}',
+        'media_id': media_id,
+        'status': post_status,
+        'reporter_name': real_reporter_name
+    }
 
 
 @api_router.post("/save-video-upload")
@@ -1808,6 +1831,7 @@ def ensure_d1_tables():
 # ── Cloudflare API Endpoints ──────────────────────────────────────────────────
 
 @api_router.get("/health")
+@app.get("/health")
 async def health_check():
     """Detailed health check: pings MongoDB with a timeout to verify connection."""
     mongo_status = "connected"
