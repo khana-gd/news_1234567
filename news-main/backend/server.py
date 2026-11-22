@@ -137,8 +137,8 @@ db = client[os.environ.get('DB_NAME', 'publicsamachar_db')]
 
 # WordPress Config
 WP_BASE_URL = os.environ.get('WP_BASE_URL', 'https://mypublicsamachar.com')
-WP_USERNAME = os.environ.get('WP_USERNAME', '')
-WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '')
+WP_USERNAME = os.environ.get('WP_USERNAME') or 'desk.samachar'
+WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD') or 'FhxW 547B 290T soRo KDbA FKf5'
 
 # Cloudflare Config
 CF_ACCOUNT_ID = os.environ.get('CF_ACCOUNT_ID', '')
