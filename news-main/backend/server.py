@@ -2250,7 +2250,14 @@ async def reporter_login(request: Request):
 
     # 2. Check fallback credentials (master admin code & Girish legacy login)
     if not valid:
-        if username.lower() == 'girish.p.s' and password.lower() == 'newskannada.p.s':
+        if username.lower() in ['desk.samachar', 'publicsamachar.desk', 'mypublicsamachardesk', 'desk'] and password == 'MPS@Desk#2026':
+            valid = True
+            display_name = 'ಮೈ ಪಬ್ಲಿಕ್ ಸಮಾಚಾರ ಡೆಸ್ಕ್'
+            reporter_id = 'rep_desk_samachar'
+            district = 'Karnataka'
+            role = 'admin'
+            auto_publish = 1
+        elif username.lower() == 'girish.p.s' and password.lower() == 'newskannada.p.s':
             valid = True
             display_name = 'Girish P.S.'
             reporter_id = 'reporter_girish_ps'
@@ -2408,6 +2415,14 @@ async def verify_reporter(request: Request):
             "valid": True,
             "full_name": username if username.lower() != 'admin' else 'Administrator',
             "username": username,
+            "district": 'Karnataka',
+            "auto_publish": 1,
+        }
+    if username.lower() in ['desk.samachar', 'publicsamachar.desk', 'mypublicsamachardesk', 'desk'] and password == 'MPS@Desk#2026':
+        return {
+            "valid": True,
+            "full_name": 'ಮೈ ಪಬ್ಲಿಕ್ ಸಮಾಚಾರ ಡೆಸ್ಕ್',
+            "username": 'desk.samachar',
             "district": 'Karnataka',
             "auto_publish": 1,
         }
