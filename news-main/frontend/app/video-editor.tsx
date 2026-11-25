@@ -29,7 +29,7 @@ import { enqueueUpload } from '../utils/uploadQueue';
 let VideoThumbnails: any = null;
 try { VideoThumbnails = require('expo-video-thumbnails'); } catch {}
 
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 
 // ── Resilient fetch with auto-retry ──────────────────────────────────────────
 async function fetchWithRetry(
@@ -623,7 +623,7 @@ export default function VideoEditorScreen() {
               <TouchableOpacity
                 style={[styles.copyBtn, { backgroundColor: 'rgba(255,255,255,0.07)', borderColor: 'rgba(255,255,255,0.2)' }]}
                 onPress={async () => {
-                  const appLink = BACKEND ? `${BACKEND}/download` : 'https://public-samachar-api.onrender.com/download';
+                  const appLink = BACKEND ? `${BACKEND}/download` : 'https://https-github-com-khana-gd-news-1234567.onrender.com/download';
                   try {
                     await Share.share({
                       message: `📺 Watch news videos on Public Samachar!\n\nDownload the app:\n${appLink}`,
@@ -641,7 +641,7 @@ export default function VideoEditorScreen() {
               <TouchableOpacity
                 style={[styles.waBtn, { backgroundColor: '#075E54' }]}
                 onPress={() => {
-                  const appLink = BACKEND ? `${BACKEND}/download` : 'https://public-samachar-api.onrender.com/download';
+                  const appLink = BACKEND ? `${BACKEND}/download` : 'https://https-github-com-khana-gd-news-1234567.onrender.com/download';
                   const msg = `📺 *Public Samachar* — Watch local news videos!\n\nDownload the app:\n${appLink}`;
                   Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`).catch(() =>
                     Linking.openURL(`https://wa.me/?text=${encodeURIComponent(msg)}`)

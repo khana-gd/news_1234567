@@ -14,7 +14,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import CommentSheet from './CommentSheet';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 
 let YoutubePlayer: any = null;
 try { YoutubePlayer = require('react-native-youtube-iframe').default; } catch {}

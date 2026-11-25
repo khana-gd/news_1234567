@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 
 export interface UploadProgressUpdate {
   percent: number;

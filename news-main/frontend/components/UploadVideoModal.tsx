@@ -170,7 +170,7 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
       }
 
       const filename = videoAsset.uri.split('/').pop() || `vid_${Date.now()}.mp4`;
-      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 
       const jwtToken    = await AsyncStorage.getItem('reporter_jwt_token').catch(() => null);
       const repName     = await AsyncStorage.getItem('reporter_name').catch(() => null);

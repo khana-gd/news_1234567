@@ -7,7 +7,7 @@
 const WORKER_URL =
   process.env.EXPO_PUBLIC_CF_WORKER_URL ||
   process.env.EXPO_PUBLIC_BACKEND_URL ||
-  'https://public-samachar-api.onrender.com';
+  'https://https-github-com-khana-gd-news-1234567.onrender.com';
 
 // ── Types ────────────────────────────────────────────────────────────────
 

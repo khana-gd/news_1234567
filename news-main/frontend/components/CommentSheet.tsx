@@ -26,7 +26,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { formatDate } from '../utils/api';
 import { showToast } from './Toast';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 const { height: SCREEN_H } = Dimensions.get('window');
 
 export interface CommentItem {

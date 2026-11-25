@@ -35,7 +35,7 @@ import { uploadToYouTube } from '../utils/youtube';
 
 type Status = 'init' | 'ready' | 'uploading' | 'done' | 'error';
 
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 
 export default function YouTubeUploadScreen() {
   const insets = useSafeAreaInsets();

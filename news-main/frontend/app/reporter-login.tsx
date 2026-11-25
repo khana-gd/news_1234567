@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 const WP_API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mypublicsamachar.com/wp-json/wp/v2';
 const REPORTER_UNLOCK_KEY = 'reporter_unlocked_v1';
 

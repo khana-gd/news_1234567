@@ -9,7 +9,7 @@ export interface YouTubeVideo {
 // ── Dual-mode API ────────────────────────────────────────────────────────────
 // LOCAL  : calls our FastAPI proxy at EXPO_PUBLIC_BACKEND_URL/api/*
 // PROD APK: calls WordPress REST API directly at EXPO_PUBLIC_API_URL/*
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 const WP_API = process.env.EXPO_PUBLIC_API_URL || 'https://mypublicsamachar.com/wp-json/wp/v2';
 const USE_WP_DIRECT = true;
 // YouTube RSS — direct fetch in production (no backend needed)

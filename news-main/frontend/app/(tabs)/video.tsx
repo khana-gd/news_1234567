@@ -25,7 +25,7 @@ import VideoNewsCard, { VideoItem } from '../../components/VideoNewsCard';
 import PendingUploadsSheet from '../../components/PendingUploadsSheet';
 import { startQueueSyncWatcher } from '../../utils/uploadQueue';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://https-github-com-khana-gd-news-1234567.onrender.com';
 const UNLOCK_KEY  = 'reporter_unlocked_v1';
 const PS_GREEN    = '#1B5E20';
 
