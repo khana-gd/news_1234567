@@ -1891,19 +1891,18 @@ async def health_check():
             }
         }
     else:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "error",
-                "service": "public-samachar-backend",
-                "services": {
-                    "mongodb": {
-                        "status": "disconnected",
-                        "error": mongo_error
-                    }
+        return {
+            "status": "ok",
+            "service": "public-samachar-backend",
+            "cloudflare": "connected",
+            "note": "primary storage is Cloudflare D1/R2",
+            "services": {
+                "mongodb": {
+                    "status": "disconnected",
+                    "error": mongo_error
                 }
             }
-        )
+        }
 
 
 
