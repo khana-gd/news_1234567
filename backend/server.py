@@ -1863,8 +1863,10 @@ def ensure_d1_tables():
 
 # ── Cloudflare API Endpoints ──────────────────────────────────────────────────
 
-@api_router.get("/health")
-@app.get("/health")
+@api_router.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
+@api_router.api_route("/api/health", methods=["GET", "HEAD"])
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health_check():
     """Detailed health check: pings MongoDB with a timeout to verify connection."""
     mongo_status = "connected"
