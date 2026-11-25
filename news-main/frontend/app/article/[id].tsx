@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, Image, StyleSheet,
+  View, Text, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, Modal, StatusBar,
   Alert, Linking,
 } from 'react-native';
@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, Post, formatDate } from '../../utils/api';
 import { useLanguage } from '../../context/LanguageContext';
 import SocialInteractionBar from '../../components/SocialInteractionBar';
+import SafeNewsImage from '../../components/SafeNewsImage';
 
 const WHATSAPP_NUMBER = '919591484307';
 
@@ -146,14 +147,12 @@ export default function ArticleScreen() {
 
       <ScrollView testID="article-scroll" showsVerticalScrollIndicator={false}>
         {/* Featured Image */}
-        {post.featured_image && (
-          <Image
-            testID="article-featured-image"
-            source={{ uri: post.featured_image }}
-            style={styles.featuredImage}
-            resizeMode="cover"
-          />
-        )}
+        <SafeNewsImage
+          testID="article-featured-image"
+          uri={post.featured_image}
+          style={styles.featuredImage}
+          resizeMode="cover"
+        />
 
         <View style={styles.articleBody}>
           {/* Category badge */}

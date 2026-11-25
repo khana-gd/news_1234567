@@ -10,14 +10,15 @@ import {
   ActivityIndicator,
   ScrollView,
   StatusBar,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 
 const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://public-samachar-api.onrender.com';
+const WP_API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mypublicsamachar.com/wp-json/wp/v2';
 const REPORTER_UNLOCK_KEY = 'reporter_unlocked_v1';
 
 export default function ReporterLoginScreen() {
@@ -51,53 +52,119 @@ export default function ReporterLoginScreen() {
     const pass = password.trim();
 
     if (!user) {
-      setErrorMsg('Please enter your username.');
+      setErrorMsg('ಬಳಕೆದಾರ ಹೆಸರು ನಮೂದಿಸಿ (Please enter username)');
       return;
     }
     if (!pass) {
-      setErrorMsg('Please enter your password.');
+      setErrorMsg('ಪಾಸ್‌ವರ್ಡ್ ನಮೂದಿಸಿ (Please enter password)');
       return;
     }
 
     setLoading(true);
     setErrorMsg('');
 
+    const saveSecureCredentials = async (key: string, val: string) => {
+      try {
+        await SecureStore.setItemAsync(key, val);
+      } catch {}
+      await AsyncStorage.setItem(key, val).catch(() => {});
+    };
+
+    // 1. Attempt primary backend verification
+    let authSuccess = false;
+    let authData: any = null;
+
     try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
       const res = await fetch(`${BACKEND}/api/reporter-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: user, password: pass }),
+        signal: ctrl.signal,
       });
+      clearTimeout(timer);
 
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        const detail = data?.detail || 'Login failed. Please check your username and password.';
-        setErrorMsg(detail);
+      if (res.ok) {
+        authData = await res.json();
+        authSuccess = true;
+      } else if (res.status === 401 || res.status === 403) {
+        const errJson = await res.json().catch(() => ({}));
+        setErrorMsg(errJson.detail || 'ಅಮಾನ್ಯ ಲಾಗಿನ್ ವಿವರಗಳು (Invalid username or password)');
         setLoading(false);
         return;
       }
+    } catch (netErr) {
+      console.warn('Backend login notice, falling back to WordPress auth:', netErr);
+    }
 
-      // ── Store JWT & reporter info ──────────────────────────────────────────
-      await AsyncStorage.setItem('reporter_jwt_token', data.token);
-      await AsyncStorage.setItem('reporter_name', data.full_name || data.reporter_name || user);
-      await AsyncStorage.setItem('reporter_username', data.username || user);
-      await AsyncStorage.setItem('reporter_district', data.district || 'Karnataka');
-      if (data.role) {
-        await AsyncStorage.setItem('reporter_role', data.role);
+    // 2. Direct WordPress Authentication Fallback (Application Password / WordPress Users)
+    if (!authSuccess) {
+      try {
+        const encoded = btoa(`${user}:${pass}`);
+        const wpRes = await fetch(`${WP_API_URL}/users/me`, {
+          headers: {
+            Authorization: `Basic ${encoded}`,
+            Accept: 'application/json',
+          },
+        });
+        if (wpRes.ok) {
+          const wpUser = await wpRes.json();
+          authSuccess = true;
+          authData = {
+            token: `wp_basic_${encoded}`,
+            full_name: wpUser.name || user,
+            username: wpUser.slug || user,
+            district: 'Karnataka',
+            role: wpUser.roles?.[0] || 'reporter',
+          };
+        } else {
+          // Try custom verify-reporter endpoint
+          const wpVerify = await fetch('https://mypublicsamachar.com/wp-json/mps/v1/verify-reporter', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user, password: pass }),
+          });
+          if (wpVerify.ok) {
+            const vData = await wpVerify.json();
+            authSuccess = true;
+            authData = {
+              token: vData.token || `wp_auth_${user}`,
+              full_name: vData.reporter_name || user,
+              username: user,
+              district: 'Karnataka',
+              role: 'reporter',
+            };
+          }
+        }
+      } catch (wpErr) {
+        console.warn('WordPress auth fallback notice:', wpErr);
       }
-      await AsyncStorage.setItem(REPORTER_UNLOCK_KEY, 'true');
+    }
 
-      // Navigate back
-      if (returnTo) {
-        router.replace(returnTo as any);
-      } else if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/(tabs)/user' as any);
-      }
-    } catch {
-      setErrorMsg('Connection failed. Please check your internet and try again.');
+    if (!authSuccess || !authData) {
+      setErrorMsg('ಲಾಗಿನ್ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಬಳಕೆದಾರ ಹೆಸರು ಮತ್ತು ಪಾಸ್‌ವರ್ಡ್ ಪರಿಶೀಲಿಸಿ (Login failed. Please verify credentials).');
+      setLoading(false);
+      return;
+    }
+
+    // ── Securely Store Token & Reporter Profile ──────────────────────────────
+    await saveSecureCredentials('reporter_jwt_token', authData.token || '');
+    await saveSecureCredentials('reporter_name', authData.full_name || authData.reporter_name || user);
+    await saveSecureCredentials('reporter_username', authData.username || user);
+    await saveSecureCredentials('reporter_district', authData.district || 'Karnataka');
+    if (authData.role) {
+      await saveSecureCredentials('reporter_role', authData.role);
+    }
+    await AsyncStorage.setItem(REPORTER_UNLOCK_KEY, 'true');
+
+    // Navigate back
+    if (returnTo) {
+      router.replace(returnTo as any);
+    } else if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/user' as any);
     }
 
     setLoading(false);

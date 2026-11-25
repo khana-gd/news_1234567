@@ -99,7 +99,16 @@ const parseWPPost = (p: any): Post => {
     sizes.thumbnail?.source_url ||
     p._embedded?.['wp:featuredmedia']?.[0]?.source_url ||
     null;
-  const featuredImage = p.mps_featured_image || embeddedImage;
+  let featuredImage = p.mps_featured_image || embeddedImage;
+
+  // Filter out .svg or fallback-thumb.svg to let mobile app use crisp bundled local placeholder
+  if (
+    featuredImage &&
+    typeof featuredImage === 'string' &&
+    (featuredImage.endsWith('.svg') || featuredImage.includes('fallback-thumb.svg'))
+  ) {
+    featuredImage = null;
+  }
 
   const categoryTerms: any[] = p._embedded?.['wp:term']?.[0] || [];
   const decodeEntities = (str: string) =>
@@ -107,19 +116,24 @@ const parseWPPost = (p: any): Post => {
        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'");
 
   // Clean content: prefer mps_clean_content, fallback to content.rendered with regex stripping ads and carriage returns
-  const rawContent = p.content?.rendered || '';
-  const cleanContentFallback = rawContent.replace(/\[ad[_-]?\d+\]|\\r|\r/gi, '').trim();
-  const mpsCleanContent = p.mps_clean_content ? String(p.mps_clean_content).trim() : cleanContentFallback;
+  const rawContent = p.mps_clean_content || p.content?.rendered || '';
+  const mpsCleanContent = String(rawContent)
+    .replace(/\[ad[_-]?\d+\]/gi, '')
+    .replace(/\\r\\n|\\r|\\n|\r/g, '\n')
+    .trim();
 
-  // Reporter name: prefer mps_reporter_name, fallback to author embedded name or 'ಡೆಸ್ಕ್'
-  const mpsReporterName = p.mps_reporter_name || p._embedded?.author?.[0]?.name || 'ಡೆಸ್ಕ್';
+  // Reporter name: prefer mps_reporter_name, fallback to author embedded name or 'ಸುದ್ದಿ ಡೆಸ್ಕ್'
+  const mpsReporterName = p.mps_reporter_name || p._embedded?.author?.[0]?.name || 'ಸುದ್ದಿ ಡೆಸ್ಕ್';
 
   // AI summary: array of 3 bullet points
   let mpsAiSummary: string[] = [];
   if (Array.isArray(p.mps_ai_summary)) {
     mpsAiSummary = p.mps_ai_summary.map((s: any) => String(s).trim()).filter(Boolean);
   } else if (typeof p.mps_ai_summary === 'string' && p.mps_ai_summary.trim()) {
-    mpsAiSummary = [p.mps_ai_summary.trim()];
+    mpsAiSummary = p.mps_ai_summary
+      .split(/\r?\n|•|\*/)
+      .map((s: string) => s.trim())
+      .filter((s: string) => s.length > 0);
   }
 
   return {
@@ -185,10 +199,21 @@ export const api = {
 
   getCategories: async (): Promise<Category[]> => {
     if (USE_WP_DIRECT) {
-      const data = await fetchJson(`${WP_API}/categories?per_page=50&orderby=count&order=desc&hide_empty=true`);
-      return (data as any[]).map((c: any) => ({ id: c.id, name: c.name, slug: c.slug, count: c.count }));
+      try {
+        const data = await fetchJson(`${WP_API}/categories?per_page=100&orderby=count&order=desc`);
+        if (Array.isArray(data) && data.length > 0) {
+          return data.map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            slug: c.slug,
+            count: Number(c.count) || 0,
+          }));
+        }
+      } catch (err) {
+        console.warn('WP getCategories failed, falling back to backend:', err);
+      }
     }
-    return fetchJson(`${BACKEND_URL}/api/categories`);
+    return fetchJson(`${BACKEND_URL}/api/categories`).catch(() => []);
   },
 
   getStories: async (): Promise<Post[]> => {
@@ -232,10 +257,16 @@ export const api = {
     return fetchJson(`${BACKEND_URL}/api/trending?${params}`);
   },
 
-  getVideos: (page = 1, categoryId?: number | null): Promise<{ posts: Post[]; total: number }> => {
+  getVideos: async (page = 1, categoryId?: number | null): Promise<{ posts: Post[]; total: number }> => {
+    // If specific category requested or direct WP mode, get WP posts for video-feed (cat 92) or specified category
+    const cat = categoryId || 92;
+    try {
+      const resp = await wpGetPosts(page, 15, cat, 'date');
+      if (resp && resp.posts.length > 0) return resp;
+    } catch {}
     const params = new URLSearchParams({ page: String(page) });
     if (categoryId) params.append('category_id', String(categoryId));
-    return fetchJson(`${BACKEND_URL}/api/videos?${params}`);
+    return fetchJson(`${BACKEND_URL}/api/videos?${params}`).catch(() => ({ posts: [], total: 0 }));
   },
 
   getPost: async (id: number): Promise<Post> => {
@@ -275,8 +306,52 @@ export const api = {
   },
 
   getWPVideoFeed: async (page = 1): Promise<WPVideoItem[]> => {
-    // Always use the backend proxy for video feed
-    // This avoids CORS issues in web and ensures the backend enriches titles
+    // 1. Direct WordPress fetch for category 92 (video-feed)
+    try {
+      const resp = await fetch(`${WP_API}/posts?categories=92&_embed=1&per_page=20&page=${page}`);
+      if (resp.ok) {
+        const posts = await resp.json();
+        if (Array.isArray(posts) && posts.length > 0) {
+          const items: WPVideoItem[] = [];
+          for (const p of posts) {
+            const raw = p.content?.rendered || '';
+            const mp4Match = raw.match(/https?:\/\/[^\s"'<>]+\.(?:mp4|m3u8)/i);
+            const ytMatch = raw.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]+)/i);
+            const sizes = p._embedded?.['wp:featuredmedia']?.[0]?.media_details?.sizes || {};
+            let thumb = sizes.medium?.source_url || sizes.thumbnail?.source_url || p.mps_featured_image || p._embedded?.['wp:featuredmedia']?.[0]?.source_url || '';
+            if (thumb && (thumb.endsWith('.svg') || thumb.includes('fallback-thumb.svg'))) {
+              thumb = '';
+            }
+
+            const decode = (s: string) =>
+              s.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+               .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'");
+
+            const url = mp4Match ? mp4Match[0] : '';
+            const ytUrl = ytMatch ? `https://www.youtube.com/watch?v=${ytMatch[1]}` : undefined;
+            if (url || ytUrl) {
+              items.push({
+                id: p.id,
+                title: decode(p.title?.rendered || ''),
+                caption: (p.excerpt?.rendered || '').replace(/<[^>]+>/g, '').trim(),
+                url,
+                mime_type: 'video/mp4',
+                date: p.date || '',
+                link: p.link || '',
+                youtubeUrl: ytUrl,
+                thumbnail: thumb,
+                source: url ? 'wordpress' : 'youtube',
+              });
+            }
+          }
+          if (items.length > 0) return items;
+        }
+      }
+    } catch (e) {
+      console.warn('Direct WP video feed notice:', e);
+    }
+
+    // 2. Fallback to backend proxy if available
     try {
       return await fetchJson(`${BACKEND_URL}/api/wp-video-feed?page=${page}`);
     } catch {

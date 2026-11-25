@@ -1,0 +1,36 @@
+# Dependencies and Virtual Environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Environment and secrets
+.env
+.env.*
+*.env
+*reporter_credentials*
+backend/reporter_credentials_PRIVATE.txt
+news-main/backend/reporter_credentials_PRIVATE.txt
+
+# Databases and local caches
+*.db
+*.sqlite
+*.sqlite3
+
+# Video and test artifacts
+*.mp4
+*.mp3
+*.wav
+video_assets/
+*.tsbuildinfo
+
+# Node / Mobile
+node_modules/
+.expo/
+dist/
+build/
+
+# Test images
+test_kannada_render.png
+public_samachar_explainer_poster.jpg
+START_VIDEO_SERVER.bat

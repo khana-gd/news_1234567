@@ -19,6 +19,7 @@ import SocialInteractionBar from '../../components/SocialInteractionBar';
 import CommentSheet from '../../components/CommentSheet';
 import { showToast } from '../../components/Toast';
 import { NewsCardSkeletonList } from '../../components/NewsCardSkeleton';
+import SafeNewsImage from '../../components/SafeNewsImage';
 import { BRAND } from '../../constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -443,11 +444,11 @@ export default function HomeScreen() {
       onPress={() => router.push(`/article/${post.id}`)}
       activeOpacity={0.88}
     >
-      {post.featured_image
-        ? <Image source={{ uri: post.featured_image }} style={styles.newsCardImage} resizeMode="cover" />
-        : <View style={[styles.newsCardImage, styles.newsCardImagePlaceholder]}>
-            <MaterialIcons name="article" size={30} color="#ccc" />
-          </View>}
+      <SafeNewsImage
+        uri={post.featured_image}
+        style={styles.newsCardImage}
+        resizeMode="cover"
+      />
       <View style={styles.newsCardContent}>
         <Text style={styles.newsCardTitle} numberOfLines={2}>{post.title}</Text>
         <View style={styles.newsCardFooter}>
@@ -893,23 +894,39 @@ export default function HomeScreen() {
                 <Text style={styles.emptyTitle}>
                   {showFollowingOnly
                     ? (language === 'kn' ? 'ಇನ್ನೂ ಸುದ್ದಿ ಇಲ್ಲ' : 'No news yet')
+                    : selectedCatId !== null
+                    ? (language === 'kn' ? 'ಈ ವಿಭಾಗದಲ್ಲಿ ಸದ್ಯಕ್ಕೆ ಸುದ್ದಿಗಳಿಲ್ಲ' : 'No news in this category yet')
                     : t('noNews')}
                 </Text>
                 <Text style={styles.emptyText}>
                   {showFollowingOnly
                     ? (language === 'kn' ? 'ನೀವು ಅನುಸರಿಸುತ್ತಿರುವ ವರದಿಗಾರರಿಂದ ಇನ್ನೂ ಸುದ್ದಿ ಪ್ರಕಟವಾಗಿಲ್ಲ' : 'None of the reporters you follow have posted yet.')
+                    : selectedCatId !== null
+                    ? (language === 'kn' ? 'ಕೆಳಗೆ ನೀಡಲಾದ ಪ್ರಮುಖ ಸುದ್ದಿಗಳನ್ನು ಓದಿ' : 'Check out trending stories below')
                     : (language === 'kn' ? 'ಎಳೆದು ಹೊಸ ಸುದ್ದಿಗಾಗಿ ರಿಫ್ರೆಶ್ ಮಾಡಿ' : 'Pull down to refresh feed')}
                 </Text>
-                {showFollowingOnly && (
+                {(showFollowingOnly || selectedCatId !== null) && (
                   <TouchableOpacity
                     testID="empty-show-all-btn"
                     style={styles.emptyActionBtn}
-                    onPress={() => setShowFollowingOnly(false)}
+                    onPress={() => {
+                      setShowFollowingOnly(false);
+                      setSelectedCatId(null);
+                    }}
                   >
                     <Text style={styles.emptyActionText}>
-                      {language === 'kn' ? 'ಎಲ್ಲ ಸುದ್ದಿ ತೋರಿಸಿ' : 'Show all news'}
+                      {language === 'kn' ? 'ಎಲ್ಲ ಸುದ್ದಿ ವೀಕ್ಷಿಸಿ' : 'View all news'}
                     </Text>
                   </TouchableOpacity>
+                )}
+                {/* Fallback trending posts so category tab is never empty or dead */}
+                {featuredPosts.length > 0 && selectedCatId !== null && (
+                  <View style={{ width: '100%', marginTop: 24 }}>
+                    <Text style={[styles.newsSectionTitle, { textAlign: 'left', marginBottom: 12 }]}>
+                      {language === 'kn' ? '🔥 ಪ್ರಮುಖ ಬ್ರೇಕಿಂಗ್ ಸುದ್ದಿಗಳು' : '🔥 Top Trending News'}
+                    </Text>
+                    {featuredPosts.slice(0, 4).map(p => renderPostCard(p))}
+                  </View>
                 )}
               </View>
             ) : (

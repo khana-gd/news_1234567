@@ -85,6 +85,18 @@ export default function PostNewsScreen() {
     if (!res.canceled && res.assets.length > 0) {
       const asset = res.assets[0];
       const filename = asset.uri.split('/').pop() || `news_${Date.now()}.jpg`;
+      const ext = filename.split('.').pop()?.toLowerCase();
+
+      if (ext && !['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+        Alert.alert('ಅಮಾನ್ಯ ಚಿತ್ರ', 'ದಯವಿಟ್ಟು JPG, PNG ಅಥವಾ WEBP ಚಿತ್ರವನ್ನು ಮಾತ್ರ ಆಯ್ಕೆಮಾಡಿ (Only JPG, PNG or WEBP allowed).');
+        return;
+      }
+
+      if (asset.fileSize && asset.fileSize > 12 * 1024 * 1024) {
+        Alert.alert('ಚಿತ್ರದ ಗಾತ್ರ ಅಧಿಕವಾಗಿದೆ', 'ಚಿತ್ರದ ಗಾತ್ರ 12MB ಗಿಂತ ಕಡಿಮೆಯಿರಬೇಕು (Image must be under 12MB).');
+        return;
+      }
+
       setSelectedImage({
         uri: asset.uri,
         base64: asset.base64 || undefined,
@@ -129,22 +141,59 @@ export default function PostNewsScreen() {
         headers['Authorization'] = `Bearer ${jwtToken}`;
       }
 
-      const res = await fetch(`${BACKEND_URL}/api/submit-post`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
+      let submitted = false;
+      let respData: any = null;
 
-      const data = await res.json().catch(() => ({}));
+      // 1. Try Backend submit-post endpoint
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 15000);
+        const res = await fetch(`${BACKEND_URL}/api/submit-post`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          respData = await res.json().catch(() => ({}));
+          submitted = !!respData.success;
+        }
+      } catch (beErr) {
+        console.warn('Backend submit notice, trying WP direct endpoint:', beErr);
+      }
 
-      if (res.ok && data.success) {
+      // 2. Direct fallback to WordPress /wp-json/mps/v1/submit-news
+      if (!submitted) {
+        try {
+          const wpRes = await fetch('https://mypublicsamachar.com/wp-json/mps/v1/submit-news', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              title: cleanTitle,
+              content: payload.content,
+              category: category,
+              district: district,
+              reporter_name: reporterName,
+            }),
+          });
+          if (wpRes.ok) {
+            respData = await wpRes.json().catch(() => ({}));
+            submitted = true;
+          }
+        } catch (wpErr) {
+          console.warn('WP submit notice:', wpErr);
+        }
+      }
+
+      if (submitted) {
         Alert.alert(
           'ಯಶಸ್ವಿ!',
           'ನಿಮ್ಮ ಸುದ್ದಿಯನ್ನು ಯಶಸ್ವಿಯಾಗಿ ಕಳುಹಿಸಲಾಗಿದೆ. ಪರಿಶೀಲನೆಯ ನಂತರ ಪ್ರಕಟವಾಗಲಿದೆ.',
           [{ text: 'ಸರಿ (OK)', onPress: () => router.back() }]
         );
       } else {
-        const err = data.detail || 'ಸುದ್ದಿ ಕಳುಹಿಸಲು ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
+        const err = respData?.detail || respData?.message || 'ಸುದ್ದಿ ಕಳುಹಿಸಲು ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
         Alert.alert('ದೋಷ', err);
       }
     } catch {

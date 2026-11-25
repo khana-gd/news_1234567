@@ -119,9 +119,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     }
   }, [allCategories]);
 
-  const findCategoryForLanguage = (lang: Language, _cats: any[]) => {
-    // Karnataka (ID 19) = the correct Kannada language category, verified from WordPress API
-    setLanguageCategoryId(lang === 'kn' ? 19 : null);
+  const findCategoryForLanguage = (_lang: Language, _cats: any[]) => {
+    // Language toggle controls UI localization; keep news feed open to all categories
+    setLanguageCategoryId(null);
   };
 
   const detectLanguageCategory = useCallback((categories: any[]) => {

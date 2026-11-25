@@ -1084,6 +1084,7 @@ async def submit_video(
             post_payload = {
                 'title': title, 'content': post_content,
                 'status': post_status, 'format': 'video', 'featured_media': media_id,
+                'categories': [92],
             }
             post_r = await wp_post_req('posts', json_body=post_payload, timeout=20.0)
             if post_r and post_r.status_code in [200, 201]:

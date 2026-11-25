@@ -112,6 +112,15 @@ export default function UploadVideoModal({ visible, onClose, language }: Props) 
     });
     if (!result.canceled && result.assets.length > 0) {
       const asset = result.assets[0];
+      const filename = asset.uri.split('/').pop() || '';
+      const ext = filename.split('.').pop()?.toLowerCase();
+      if (ext && !['mp4', 'mov', 'm4v', 'webm'].includes(ext)) {
+        Alert.alert(
+          isKn ? 'ಅಮಾನ್ಯ ಫೈಲ್' : 'Invalid File',
+          isKn ? 'ದಯವಿಟ್ಟು MP4, MOV ಅಥವಾ WEBM ವಿಡಿಯೋ ಆಯ್ಕೆಮಾಡಿ.' : 'Please select an MP4, MOV, or WEBM video.'
+        );
+        return;
+      }
       setAsset(asset);
       setStep('details');
     }

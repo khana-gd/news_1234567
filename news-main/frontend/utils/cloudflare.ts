@@ -87,17 +87,87 @@ export function ytToTikTok(v: {
 
 // ── API calls ────────────────────────────────────────────────────────────
 
+const WP_API_FALLBACK =
+  process.env.EXPO_PUBLIC_API_URL || 'https://mypublicsamachar.com/wp-json/wp/v2';
+
 export async function fetchCFVideos(page = 1, limit = 10): Promise<CFVideoItem[]> {
+  // 1. Try Render / Cloudflare Worker video endpoint
   try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
     const resp = await fetch(`${WORKER_URL}/api/cf/videos?page=${page}&limit=${limit}`, {
+      signal: ctrl.signal,
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     });
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    return data.videos || [];
-  } catch {
-    return [];
+    clearTimeout(timer);
+    if (resp.ok) {
+      const data = await resp.json();
+      const vids = data.videos || (Array.isArray(data) ? data : []);
+      if (Array.isArray(vids) && vids.length > 0) {
+        return vids;
+      }
+    }
+  } catch (e) {
+    console.warn('fetchCFVideos backend notice:', e);
   }
+
+  // 2. Fallback to direct WordPress Category 92 (video-feed)
+  try {
+    const wpResp = await fetch(
+      `${WP_API_FALLBACK}/posts?categories=92&_embed=1&per_page=${limit}&page=${page}`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (wpResp.ok) {
+      const posts = await wpResp.json();
+      if (Array.isArray(posts) && posts.length > 0) {
+        const items: CFVideoItem[] = [];
+        for (const p of posts) {
+          const raw = p.content?.rendered || '';
+          const mp4Match = raw.match(/https?:\/\/[^\s"'<>]+\.(?:mp4|m3u8)/i);
+          const sizes = p._embedded?.['wp:featuredmedia']?.[0]?.media_details?.sizes || {};
+          let thumb =
+            sizes.medium?.source_url ||
+            sizes.thumbnail?.source_url ||
+            p.mps_featured_image ||
+            p._embedded?.['wp:featuredmedia']?.[0]?.source_url ||
+            '';
+          if (thumb && (thumb.endsWith('.svg') || thumb.includes('fallback-thumb.svg'))) {
+            thumb = '';
+          }
+
+          const decode = (s: string) =>
+            s
+              .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/&#039;/g, "'");
+
+          const vidUrl = mp4Match ? mp4Match[0] : '';
+          if (vidUrl) {
+            items.push({
+              id: `wp_${p.id}`,
+              title: decode(p.title?.rendered || ''),
+              description: (p.excerpt?.rendered || '').replace(/<[^>]+>/g, '').trim(),
+              video_url: vidUrl,
+              thumb_url: thumb,
+              reporter_name: p.mps_reporter_name || p._embedded?.author?.[0]?.name || 'ಸುದ್ದಿ ಡೆಸ್ಕ್',
+              reporter_id: `wp_author_${p.author || 1}`,
+              timestamp: p.date ? new Date(p.date).getTime() : Date.now(),
+              duration: 60,
+              views: 1000,
+            });
+          }
+        }
+        if (items.length > 0) return items;
+      }
+    }
+  } catch (wpe) {
+    console.warn('fetchCFVideos WP fallback notice:', wpe);
+  }
+
+  return [];
 }
 
 export async function fetchCFProfile(profileId: string): Promise<CFProfile | null> {

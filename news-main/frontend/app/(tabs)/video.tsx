@@ -11,7 +11,6 @@ import {
   StatusBar,
   TouchableOpacity,
   Text,
-  ActivityIndicator,
   RefreshControl,
   Image,
   Platform,
@@ -85,52 +84,157 @@ const BOOTSTRAP_VIDEOS: VideoItem[] = [
   },
 ];
 
-// ── Fetch Cloudflare / PS videos with fast timeout and SWR caching ─────
+// ── Fetch Videos from Render API + WordPress Category 92 (video-feed) Fallback ─────
+const WP_API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mypublicsamachar.com/wp-json/wp/v2';
+
 async function fetchCFVideos(page = 1): Promise<VideoItem[]> {
-  const MAX = 2;
-  for (let attempt = 1; attempt <= MAX; attempt++) {
+  const itemsMap = new Map<string, VideoItem>();
+
+  // 1. Fetch from Render video API with cold-start timeout handling
+  const fetchRender = async (): Promise<VideoItem[]> => {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 4500); // 4.5s fast timeout
+      const timer = setTimeout(() => ctrl.abort(), 12000); // 12s timeout
       const resp = await fetch(
         `${BACKEND_URL}/api/cf/videos?page=${page}&limit=20`,
-        {
+        { signal: ctrl.signal, headers: { Accept: 'application/json' } }
+      ).catch(() =>
+        fetch(`${BACKEND_URL}/api/videos?page=${page}&limit=20`, {
           signal: ctrl.signal,
-          headers: { 'Accept': 'application/json' },
-        }
+          headers: { Accept: 'application/json' },
+        })
+      );
+      clearTimeout(timer);
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        const rawList = Array.isArray(data?.videos)
+          ? data.videos
+          : Array.isArray(data)
+          ? data
+          : Array.isArray(data?.posts)
+          ? data.posts
+          : [];
+        return rawList.map((v: any) => ({
+          id: `cf_${v.id || v._id || Math.random()}`,
+          title: v.title || '',
+          description: v.description || '',
+          videoUrl: v.video_url || v.videoUrl || '',
+          thumbUrl: v.thumb_url || v.thumbUrl || '',
+          reporterName: v.reporter_name || v.reporterName || 'ಸುದ್ದಿ ಡೆಸ್ಕ್',
+          timestamp:
+            typeof v.timestamp === 'number'
+              ? v.timestamp
+              : v.created_at
+              ? new Date(v.created_at).getTime()
+              : Date.now(),
+          location: v.location || 'ಕರ್ನಾಟಕ',
+          source: 'ps' as const,
+          cfId: v.id,
+          reach: v.views || v.reach || 0,
+          cautionFlag: !!v.caution_flag,
+          verified: !!v.verified,
+          aspectRatio: (v.aspect_ratio || v.aspectRatio || '9:16') as '9:16' | '16:9',
+        })).filter((v: VideoItem) => !!v.videoUrl);
+      }
+    } catch (e) {
+      console.warn('[VideoFeed] Render fetch notice:', e);
+    }
+    return [];
+  };
+
+  // 2. Fetch directly from WordPress Category 92 (video-feed)
+  const fetchWPVideoFeed = async (): Promise<VideoItem[]> => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000); // 8s fast timeout
+      const resp = await fetch(
+        `${WP_API_URL}/posts?categories=92&_embed=1&per_page=20&page=${page}`,
+        { signal: ctrl.signal, headers: { Accept: 'application/json' } }
       );
       clearTimeout(timer);
       if (resp.ok) {
-        const data = await resp.json();
-        const rawList = Array.isArray(data?.videos) ? data.videos : [];
-        if (rawList.length > 0) {
-          const videos: VideoItem[] = rawList.map((v: any) => ({
-            id:           `cf_${v.id}`,
-            title:        v.title        || '',
-            description:  v.description  || '',
-            videoUrl:     v.video_url    || '',
-            thumbUrl:     v.thumb_url    || '',
-            reporterName: v.reporter_name || 'Reporter',
-            timestamp:    v.timestamp    || 0,
-            location:     v.location     || '',
-            source:       'ps'            as const,
-            cfId:         v.id,
-            reach:        v.views         || 0,
-            cautionFlag:  !!v.caution_flag,
-            verified:     !!v.verified,
-            aspectRatio:  v.aspect_ratio  || '9:16',
-          }));
-          return videos;
+        const posts = await resp.json();
+        if (Array.isArray(posts)) {
+          const list: VideoItem[] = [];
+          for (const p of posts) {
+            const rawContent = p.content?.rendered || '';
+            const mp4Match = rawContent.match(/https?:\/\/[^\s"'<>]+\.(?:mp4|m3u8)/i);
+            const ytMatch = rawContent.match(
+              /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]+)/i
+            );
+            const locMatch =
+              rawContent.match(/Location:\s*(?:<\/strong>\s*)?([^<\n]+)/i) ||
+              rawContent.match(/\[ಜಿಲ್ಲೆ:\s*([^\]\n]+)\]/i);
+            const loc = locMatch ? locMatch[1].trim() : 'ಕರ್ನಾಟಕ';
+
+            const sizes = p._embedded?.['wp:featuredmedia']?.[0]?.media_details?.sizes || {};
+            let thumb =
+              sizes.medium?.source_url ||
+              sizes.thumbnail?.source_url ||
+              p.mps_featured_image ||
+              p._embedded?.['wp:featuredmedia']?.[0]?.source_url ||
+              '';
+            if (thumb && (thumb.endsWith('.svg') || thumb.includes('fallback-thumb.svg'))) {
+              thumb = '';
+            }
+
+            const decode = (s: string) =>
+              s
+                .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .replace(/&#039;/g, "'");
+
+            const vidUrl = mp4Match ? mp4Match[0] : '';
+            const ytId = ytMatch ? ytMatch[1] : undefined;
+
+            if (vidUrl || ytId) {
+              list.push({
+                id: `wp_${p.id}`,
+                title: decode(p.title?.rendered || ''),
+                description: (p.excerpt?.rendered || '').replace(/<[^>]+>/g, '').trim(),
+                videoUrl: vidUrl,
+                thumbUrl: thumb,
+                reporterName: p.mps_reporter_name || p._embedded?.author?.[0]?.name || 'ಸುದ್ದಿ ಡೆಸ್ಕ್',
+                timestamp: p.date ? new Date(p.date).getTime() : Date.now(),
+                location: loc,
+                source: vidUrl ? 'ps' : 'youtube',
+                youtubeId: ytId,
+                cfId: String(p.id),
+                reach: 1200,
+                cautionFlag: false,
+                verified: true,
+                aspectRatio: '16:9',
+              });
+            }
+          }
+          return list;
         }
       }
-    } catch (err) {
-      console.warn(`[VideoFeed] Fetch attempt ${attempt} error:`, err);
+    } catch (e) {
+      console.warn('[VideoFeed] WP cat 92 fetch notice:', e);
     }
-    if (attempt < MAX) {
-      await new Promise(r => setTimeout(r, 600));
+    return [];
+  };
+
+  // Run in parallel for high-speed responsiveness
+  const [renderItems, wpItems] = await Promise.all([
+    fetchRender(),
+    fetchWPVideoFeed(),
+  ]);
+
+  // Merge and deduplicate by video URL or clean title
+  for (const item of [...renderItems, ...wpItems]) {
+    const key = item.videoUrl ? item.videoUrl.split('?')[0] : item.title.trim();
+    if (!itemsMap.has(key)) {
+      itemsMap.set(key, item);
     }
   }
-  return [];
+
+  const merged = Array.from(itemsMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+  return merged.length > 0 ? merged : (page === 1 ? BOOTSTRAP_VIDEOS : []);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

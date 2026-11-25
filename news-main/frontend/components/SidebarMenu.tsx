@@ -24,7 +24,7 @@ interface SidebarMenuProps {
 export default function SidebarMenu({
   visible, categories, onClose, onCategorySelect,
 }: SidebarMenuProps) {
-  const { language } = useLanguage();
+  const { language, setLanguage } = useLanguage();
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
 
@@ -83,6 +83,26 @@ export default function SidebarMenu({
         </View>
 
         <ScrollView style={styles.drawerBody} showsVerticalScrollIndicator={false}>
+          {/* Quick Language Toggle */}
+          <View style={styles.langToggleRow}>
+            <TouchableOpacity
+              style={[styles.langBtn, language === 'kn' && styles.langBtnActive]}
+              onPress={() => setLanguage('kn')}
+            >
+              <Text style={[styles.langBtnTxt, language === 'kn' && styles.langBtnTxtActive]}>
+                🇮🇳 ಕನ್ನಡ
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.langBtn, language === 'en' && styles.langBtnActive]}
+              onPress={() => setLanguage('en')}
+            >
+              <Text style={[styles.langBtnTxt, language === 'en' && styles.langBtnTxtActive]}>
+                🇬🇧 English
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           <Text style={styles.sectionLabel}>
             {language === 'kn' ? 'ವಿಭಾಗಗಳು' : 'Categories'}
           </Text>
@@ -196,6 +216,36 @@ const styles = StyleSheet.create({
   drawerTagline: { color: 'rgba(255,255,255,0.85)', fontSize: 10, marginTop: 2 },
   drawerCloseBtn: { padding: 4 },
   drawerBody: { flex: 1 },
+  langToggleRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+    gap: 8,
+  },
+  langBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#F0F4F8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  langBtnActive: {
+    backgroundColor: '#E6F4EA',
+    borderColor: '#1AAA94',
+  },
+  langBtnTxt: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  langBtnTxtActive: {
+    color: '#0F766E',
+    fontWeight: '700',
+  },
   sectionLabel: {
     fontSize: 11, fontWeight: '700', color: '#999',
     paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4,
