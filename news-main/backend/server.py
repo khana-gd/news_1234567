@@ -1066,29 +1066,40 @@ async def submit_video(
     video_url = f'{R2_PUBLIC_CDN}/{video_key}'
     thumb_url = f'{R2_PUBLIC_CDN}/{thumb_key}' if thumb_key else ''
 
-    # ── Step 2: Best-effort sync to WordPress (safe fallback, never fails upload) ──
+    # ── Step 2: Sync to WordPress Category 92 (Video Feed) ──
     post_id = None
     media_id = None
     try:
-        media_resp = await wp_post_req('media', content=video_data,
-                                       headers_extra={'Content-Type': content_type,
-                                                      'Content-Disposition': f'attachment; filename="{filename}"'},
-                                       timeout=30.0)
-        if media_resp and media_resp.status_code in [200, 201]:
-            media_id = media_resp.json().get('id')
-            media_url_wp = media_resp.json().get('source_url', video_url)
-            patch_payload = {'title': title, 'caption': description.strip(), 'alt_text': real_location}
-            await wp_post_req(f'media/{media_id}', json_body=patch_payload, timeout=10.0)
+        # If thumbnail image is present, upload thumbnail to WordPress media library
+        if thumb_key and 'thumb_data' in locals() and thumb_data:
+            try:
+                thumb_resp = await wp_post_req(
+                    'media', content=thumb_data,
+                    headers_extra={'Content-Type': 'image/jpeg',
+                                   'Content-Disposition': f'attachment; filename="thumb_{video_id[:8]}.jpg"'},
+                    timeout=15.0
+                )
+                if thumb_resp and thumb_resp.status_code in [200, 201]:
+                    media_id = thumb_resp.json().get('id')
+            except Exception as te:
+                logger.warning(f"Thumbnail upload notice: {te}")
 
-            post_content = f"{description}\n\n<p><strong>Location:</strong> {real_location}</p>\n\n[video src=\"{media_url_wp}\"][/video]"
-            post_payload = {
-                'title': title, 'content': post_content,
-                'status': post_status, 'format': 'video', 'featured_media': media_id,
-                'categories': [92],
-            }
-            post_r = await wp_post_req('posts', json_body=post_payload, timeout=20.0)
-            if post_r and post_r.status_code in [200, 201]:
-                post_id = post_r.json().get('id')
+        post_content = f"""{description}\n\n<p><strong>ಸ್ಥಳ:</strong> {real_location} | <strong>ವರದಿಗಾರರು:</strong> {real_reporter_name}</p>\n\n<!-- wp:video -->\n<figure class="wp-block-video"><video controls src="{video_url}"></video></figure>\n<!-- /wp:video -->\n\n[video src="{video_url}"][/video]"""
+
+        post_payload = {
+            'title': title,
+            'content': post_content,
+            'status': post_status,
+            'format': 'video',
+            'categories': [92],
+        }
+        if media_id:
+            post_payload['featured_media'] = media_id
+
+        post_r = await wp_post_req('posts', json_body=post_payload, timeout=20.0)
+        if post_r and post_r.status_code in [200, 201]:
+            post_id = post_r.json().get('id')
+            logger.info(f"submit_video: Published WordPress video post #{post_id} in Category 92")
     except Exception as wpe:
         logger.warning(f"WordPress video sync notice (safe fallback): {wpe}")
 
