@@ -1645,7 +1645,7 @@
 
       <div class="form-group" style="margin-bottom: 14px;">
         <label class="form-label">API BACKEND URL</label>
-        <input type="text" id="cfgBackendUrl" class="form-input" placeholder="https://public-samachar-api.onrender.com">
+        <input type="text" id="cfgBackendUrl" class="form-input" placeholder="https://https-github-com-khana-gd-news-1234567.onrender.com">
       </div>
 
       <div class="form-group" style="margin-bottom: 18px;">
@@ -1817,17 +1817,22 @@
 
     // ── Backend Config Management ─────────────────────────────────────────────
     function initBackendConfig() {
-      const savedUrl = localStorage.getItem('ps_backend_url');
-      if (savedUrl) {
+      const activeRenderUrl = 'https://https-github-com-khana-gd-news-1234567.onrender.com';
+      let savedUrl = localStorage.getItem('ps_backend_url') || '';
+      // Purge suspended / stale domain from localStorage
+      if (savedUrl.includes('public-samachar-api.onrender.com')) {
+        localStorage.removeItem('ps_backend_url');
+        savedUrl = '';
+      }
+      const origin = window.location.origin || '';
+      if (origin.includes('onrender.com') || origin.includes(':8000') || origin.includes(':3000')) {
+        STATE.backendUrl = origin;
+      } else if (savedUrl) {
         STATE.backendUrl = savedUrl;
       } else {
-        const origin = window.location.origin || '';
-        if (origin.includes('onrender.com') || origin.includes(':8000')) {
-          STATE.backendUrl = origin;
-        } else {
-          STATE.backendUrl = 'https://public-samachar-api.onrender.com';
-        }
+        STATE.backendUrl = activeRenderUrl;
       }
+      localStorage.setItem('ps_backend_url', STATE.backendUrl);
       document.getElementById('cfgBackendUrl').value = STATE.backendUrl;
       document.getElementById('cfgAccessCode').value = localStorage.getItem('ps_reporter_code') || '';
     }

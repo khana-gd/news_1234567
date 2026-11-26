@@ -29,6 +29,9 @@ import shutil
 import tempfile
 import jwt as pyjwt  # PyJWT — reporter auth tokens
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(process)d] %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 # Thread pool for CPU-bound blocking I/O (boto3 presigned URLs only)
 _upload_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="r2_presign")
 
@@ -2984,6 +2987,50 @@ async def upload_cf_video(
 
     logger.info(f"CF upload complete: id={video_id}, reporter={real_reporter_name}")
 
+    # ── Auto-Sync to WordPress Category 92 (Video Feed) in Background ──────
+    async def _sync_wp_video_bg():
+        try:
+            wp_media_id = None
+            if thumb_data:
+                try:
+                    thumb_resp = await wp_post_req(
+                        'media', content=thumb_data,
+                        headers_extra={
+                            'Content-Type': 'image/jpeg',
+                            'Content-Disposition': f'attachment; filename="video_thumb_{video_id[:8]}.jpg"'
+                        },
+                        timeout=20.0
+                    )
+                    if thumb_resp and thumb_resp.status_code in [200, 201]:
+                        wp_media_id = thumb_resp.json().get('id')
+                except Exception as wme:
+                    logger.warning(f"Auto-sync WP media upload notice: {wme}")
+
+            loc_str = location.strip() or 'ಕರ್ನಾಟಕ'
+            rep_str = real_reporter_name or 'ವಿಶೇಷ ವರದಿಗಾರ'
+            desc_str = description.strip() or title
+
+            post_content = f"{desc_str}\n\n<p><strong>ಸ್ಥಳ:</strong> {loc_str} | <strong>ವರದಿಗಾರರು:</strong> {rep_str}</p>\n\n<!-- wp:video -->\n<figure class=\"wp-block-video\"><video controls src=\"{video_url}\"></video></figure>\n<!-- /wp:video -->\n\n[video src=\"{video_url}\"][/video]"
+
+            post_payload = {
+                'title': title,
+                'content': post_content,
+                'status': 'publish',
+                'format': 'video',
+                'categories': [92],
+            }
+            if wp_media_id:
+                post_payload['featured_media'] = wp_media_id
+
+            post_r = await wp_post_req('posts', json_body=post_payload, timeout=25.0)
+            if post_r and post_r.status_code in [200, 201]:
+                wp_post_id = post_r.json().get('id')
+                logger.info(f"✅ Auto-synced video {video_id} to WordPress Category 92 (Post #{wp_post_id})")
+        except Exception as wpe:
+            logger.warning(f"Auto-sync to WordPress Category 92 error: {wpe}")
+
+    asyncio.create_task(_sync_wp_video_bg())
+
     # Send push notification in background — never blocks the response
     async def _send_push_bg():
         try:
@@ -5454,12 +5501,12 @@ async def auto_cleanup_storage():
     # Sleep to allow the server process to start fully
     await asyncio.sleep(10)
     
-    # Configurable limits via environment variables (default: max 9GB, target 8GB)
+    # Configurable limits via environment variables (default: max 9.7GB, target 9.2GB)
     max_gb_env = os.environ.get("AUTO_CLEANUP_MAX_GB", "")
     target_gb_env = os.environ.get("AUTO_CLEANUP_TARGET_GB", "")
     
-    max_gb = float(max_gb_env) if max_gb_env else 9.0
-    target_gb = float(target_gb_env) if target_gb_env else 8.0
+    max_gb = float(max_gb_env) if max_gb_env else 9.7
+    target_gb = float(target_gb_env) if target_gb_env else 9.2
     
     MAX_THRESHOLD_BYTES = int(max_gb * 1024 * 1024 * 1024)
     TARGET_THRESHOLD_BYTES = int(target_gb * 1024 * 1024 * 1024)
@@ -5503,9 +5550,11 @@ async def auto_cleanup_storage():
             if total_size_bytes > MAX_THRESHOLD_BYTES:
                 logger.warning(f"Auto-cleanup: Storage limit exceeded {max_gb} GB. Starting cleanup until below {target_gb} GB...")
                 
-                # Fetch all videos sorted by timestamp ascending (oldest first)
+                # Safety guard: Never delete videos posted within the last 30 days
+                thirty_days_ago_ts = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp() * 1000)
                 old_videos = await d1_query_async(
-                    "SELECT id, title, video_url, thumb_url FROM news_feed ORDER BY timestamp ASC"
+                    "SELECT id, title, video_url, thumb_url, timestamp FROM news_feed WHERE timestamp < ? ORDER BY timestamp ASC",
+                    [thirty_days_ago_ts]
                 )
                 
                 if not old_videos:
